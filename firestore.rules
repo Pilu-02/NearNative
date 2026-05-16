@@ -1,0 +1,70 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwnUser(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function isParticipantFromResource() {
+      return signedIn() && request.auth.uid in resource.data.participantIds;
+    }
+
+    function isChatParticipant(chatId) {
+      return signedIn() &&
+        exists(/databases/$(database)/documents/chats/$(chatId)) &&
+        request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn();
+      allow create: if isOwnUser(userId);
+      allow update: if isOwnUser(userId);
+      allow delete: if false;
+    }
+    match /sosAlerts/{alertId} {
+  allow read: if signedIn();
+
+  allow create: if signedIn()
+    && request.auth.uid == alertId
+    && request.resource.data.creatorId == request.auth.uid;
+
+  allow update: if signedIn()
+    && request.auth.uid == alertId
+    && resource.data.creatorId == request.auth.uid
+    && request.resource.data.creatorId == request.auth.uid;
+
+  allow delete: if signedIn()
+    && request.auth.uid == alertId;
+}
+
+
+    match /chats/{chatId} {
+      allow read: if isParticipantFromResource();
+
+      allow create: if signedIn()
+        && request.resource.data.participantIds is list
+        && request.resource.data.participantIds.size() == 2
+        && request.auth.uid in request.resource.data.participantIds;
+
+      allow update: if isParticipantFromResource()
+        && request.resource.data.participantIds == resource.data.participantIds;
+
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if isChatParticipant(chatId);
+
+        allow create: if isChatParticipant(chatId)
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0;
+
+        allow update, delete: if false;
+      }
+    }
+  }
+}
