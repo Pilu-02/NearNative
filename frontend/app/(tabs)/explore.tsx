@@ -1,5 +1,13 @@
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, StyleSheet, Text, View } from 'react-native';
 
+import {
+  ActionButton,
+  AppScrollScreen,
+  HeroPanel,
+  MetricRow,
+  SurfaceCard,
+} from '@/components/ui/app-primitives';
+import { AppTheme } from '@/constants/theme';
 import { useAuth } from '@/contexts/auth-context';
 import { useUserProfile } from '@/contexts/user-profile-context';
 
@@ -8,108 +16,73 @@ export default function ProfileScreen() {
   const { userProfile } = useUserProfile();
 
   return (
-    <View style={styles.screen}>
-      <View style={styles.headerCard}>
-        <Text style={styles.headerTitle}>Profile</Text>
-        <Text style={styles.headerText}>
-          Phase one is complete once login, signup, Firestore storage, and sign out all work.
-        </Text>
-      </View>
+    <AppScrollScreen>
+      <HeroPanel
+        badge="Profile"
+        title="Your NearNative identity"
+        subtitle="Everything here stays lightweight and anonymous so it is easy to move through the app safely."
+      />
 
-      <View style={styles.infoCard}>
-        <Text style={styles.label}>Signed in as</Text>
-        <Text style={styles.value}>{user?.email ?? 'Unknown email'}</Text>
-        <Text style={styles.label}>Anonymous name</Text>
-        <Text style={styles.secondaryValue}>{userProfile?.anonymousName ?? 'Loading...'}</Text>
-        <Text style={styles.label}>Role</Text>
-        <Text style={styles.secondaryValue}>
-          {userProfile?.role === 'local'
-            ? 'Local'
-            : userProfile?.role === 'visitor'
-              ? 'Visitor'
-              : 'Loading...'}
-        </Text>
-
-        <Pressable
-          onPress={async () => {
-            try {
-              await logout();
-            } catch {
-              Alert.alert('Logout failed', 'Please try again.');
+      <SurfaceCard>
+        <Text style={styles.sectionTitle}>Account</Text>
+        <View style={styles.metricsWrap}>
+          <MetricRow label="Email" value={user?.email ?? 'Unknown email'} />
+          <MetricRow label="Anonymous name" value={userProfile?.anonymousName ?? 'Loading...'} />
+          <MetricRow
+            label="Role"
+            value={
+              userProfile?.role === 'local'
+                ? 'Local'
+                : userProfile?.role === 'visitor'
+                  ? 'Visitor'
+                  : 'Loading...'
             }
-          }}
-          style={({ pressed }) => [styles.logoutButton, pressed ? styles.logoutPressed : null]}>
-          <Text style={styles.logoutText}>Sign out</Text>
-        </Pressable>
-      </View>
-    </View>
+          />
+        </View>
+      </SurfaceCard>
+
+      <SurfaceCard>
+        <Text style={styles.sectionTitle}>Session</Text>
+        <Text style={styles.helperText}>
+          Sign out when you want to test another user account or role on this device.
+        </Text>
+        <View style={styles.actionRow}>
+          <ActionButton
+            label="Sign out"
+            tone="dark"
+            onPress={() => {
+              void (async () => {
+                try {
+                  await logout();
+                } catch {
+                  Alert.alert('Logout failed', 'Please try again.');
+                }
+              })();
+            }}
+          />
+        </View>
+      </SurfaceCard>
+    </AppScrollScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  headerCard: {
-    backgroundColor: '#fff',
-    borderColor: '#dbe4ee',
-    borderRadius: 24,
-    borderWidth: 1,
-    padding: 22,
+  actionRow: {
+    marginTop: 16,
   },
-  headerText: {
-    color: '#475569',
-    fontSize: 15,
-    lineHeight: 24,
+  helperText: {
+    color: AppTheme.colors.muted,
+    fontSize: 14,
+    lineHeight: 22,
     marginTop: 8,
   },
-  headerTitle: {
-    color: '#0f172a',
-    fontSize: 28,
-    fontWeight: '800',
+  metricsWrap: {
+    gap: 14,
+    marginTop: 16,
   },
-  infoCard: {
-    backgroundColor: '#0f172a',
-    borderRadius: 24,
-    gap: 12,
-    padding: 22,
-  },
-  label: {
-    color: '#94a3b8',
-    fontSize: 13,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-  },
-  logoutButton: {
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    marginTop: 8,
-    minHeight: 48,
-    justifyContent: 'center',
-    paddingHorizontal: 18,
-  },
-  logoutPressed: {
-    opacity: 0.9,
-  },
-  logoutText: {
-    color: '#0f172a',
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  screen: {
-    backgroundColor: '#f4f8fc',
-    flex: 1,
-    gap: 18,
-    padding: 22,
-    paddingTop: 74,
-  },
-  value: {
-    color: '#fff',
+  sectionTitle: {
+    color: AppTheme.colors.text,
     fontSize: 20,
-    fontWeight: '700',
-  },
-  secondaryValue: {
-    color: '#e2e8f0',
-    fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '800',
   },
 });

@@ -1,16 +1,28 @@
-import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
-import { collection, doc, getDocs, serverTimestamp, setDoc } from 'firebase/firestore';
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDocs,
+  onSnapshot,
+  serverTimestamp,
+  setDoc,
+} from 'firebase/firestore';
 
+import {
+  ActionButton,
+  AppScrollScreen,
+  EmptyStateCard,
+  HeroPanel,
+  LoadingCard,
+  MetricRow,
+  Pill,
+  SectionHeader,
+  SurfaceCard,
+} from '@/components/ui/app-primitives';
+import { AppTheme } from '@/constants/theme';
 import { useAuth } from '@/contexts/auth-context';
 import { useLocationSync } from '@/contexts/location-context';
 import { useUserProfile } from '@/contexts/user-profile-context';
@@ -19,16 +31,24 @@ import {
   buildChatParticipantFromProfile,
   buildChatParticipantFromRoute,
   getChatExpiryTimestamp,
-  getDirectChatId,
+  isTimestampExpired,
 } from '@/lib/chat';
 import { formatApproximateDistance, getDistanceInMeters } from '@/lib/distance';
 import { db } from '@/lib/firebase';
+import { formatRadiusLabel, getSosExpiryTimestamp, RADIUS_OPTIONS_METERS } from '@/lib/sos';
+import type { SosAlertDocument } from '@/types/sos';
 import type { UserProfile, UserRole } from '@/types/user';
 
-const NEARBY_RADIUS_METERS = 500;
+const DEFAULT_RADIUS_METERS = 500;
 
 type NearbyUser = UserProfile & {
   distanceInMeters: number;
+};
+
+type NearbySosAlert = SosAlertDocument & {
+  distanceInMeters: number;
+  id: string;
+  isOwnAlert: boolean;
 };
 
 function getRoleLabel(role: UserRole) {
@@ -40,9 +60,56 @@ export default function HomeScreen() {
   const { userProfile } = useUserProfile();
   const { coordinates, errorMessage, isSyncingLocation, permissionStatus, refreshLocation } =
     useLocationSync();
+  const [selectedRadiusMeters, setSelectedRadiusMeters] = useState(DEFAULT_RADIUS_METERS);
   const [nearbyUsers, setNearbyUsers] = useState<NearbyUser[]>([]);
+  const [nearbyAlerts, setNearbyAlerts] = useState<NearbySosAlert[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+  const [isLoadingAlerts, setIsLoadingAlerts] = useState(true);
+  const [isSubmittingSos, setIsSubmittingSos] = useState(false);
   const [usersError, setUsersError] = useState('');
+  const [alertsError, setAlertsError] = useState('');
+
+  const openDirectChat = useCallback(
+    async (partner: Pick<UserProfile, 'anonymousName' | 'role' | 'uid'>) => {
+      if (!user || !userProfile) {
+        Alert.alert('Unable to open chat', 'Your profile is still loading. Please try again.');
+        return;
+      }
+
+      const partnerName =
+        partner.anonymousName ?? getFallbackAnonymousName(partner.role, partner.uid);
+      const nextChatId = [user.uid, partner.uid].sort().join('_');
+      const chatRef = doc(db, 'chats', nextChatId);
+
+      try {
+        await setDoc(
+          chatRef,
+          {
+            createdAt: serverTimestamp(),
+            expiresAt: getChatExpiryTimestamp(),
+            participantIds: [user.uid, partner.uid].sort(),
+            participants: [
+              buildChatParticipantFromProfile(userProfile),
+              buildChatParticipantFromRoute(partner.uid, partnerName, partner.role),
+            ],
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+
+        router.push(
+          `/chat/${nextChatId}?partnerId=${encodeURIComponent(partner.uid)}&partnerName=${encodeURIComponent(partnerName)}&partnerRole=${encodeURIComponent(partner.role)}` as never
+        );
+      } catch (error) {
+        console.error('Failed to create or open chat.', error);
+        Alert.alert(
+          'Unable to open chat',
+          'Please check your Firestore chat rules and try again.'
+        );
+      }
+    },
+    [user, userProfile]
+  );
 
   const loadNearbyUsers = useCallback(async () => {
     if (!user || !coordinates) {
@@ -79,12 +146,12 @@ export default function HomeScreen() {
           ...candidate,
           distanceInMeters: getDistanceInMeters(
             coordinates.latitude,
-            coordinates.longitude as number,
+            coordinates.longitude,
             candidate.latitude as number,
             candidate.longitude as number
           ),
         }))
-        .filter((candidate) => candidate.distanceInMeters <= NEARBY_RADIUS_METERS)
+        .filter((candidate) => candidate.distanceInMeters <= selectedRadiusMeters)
         .sort((left, right) => left.distanceInMeters - right.distanceInMeters);
 
       setNearbyUsers(nextNearbyUsers);
@@ -96,7 +163,7 @@ export default function HomeScreen() {
     } finally {
       setIsLoadingUsers(false);
     }
-  }, [coordinates, user]);
+  }, [coordinates, selectedRadiusMeters, user]);
 
   useEffect(() => {
     if (!user || !coordinates) {
@@ -105,303 +172,513 @@ export default function HomeScreen() {
     }
 
     void loadNearbyUsers();
-  }, [coordinates, loadNearbyUsers, user]);
+  }, [coordinates, loadNearbyUsers, selectedRadiusMeters, user]);
+
+  useEffect(() => {
+    if (!user || !coordinates) {
+      setNearbyAlerts([]);
+      setIsLoadingAlerts(false);
+      return;
+    }
+
+    setIsLoadingAlerts(true);
+
+    const unsubscribe = onSnapshot(
+      collection(db, 'sosAlerts'),
+      (snapshot) => {
+        const nextAlerts = snapshot.docs
+          .map((documentSnapshot) => ({
+            id: documentSnapshot.id,
+            ...(documentSnapshot.data() as SosAlertDocument),
+          }))
+          .filter(
+            (alertDocument) =>
+              typeof alertDocument.creatorId === 'string' &&
+              typeof alertDocument.latitude === 'number' &&
+              typeof alertDocument.longitude === 'number' &&
+              typeof alertDocument.radiusMeters === 'number' &&
+              !isTimestampExpired(alertDocument.expiresAt)
+          )
+          .map((alertDocument) => {
+            const distanceInMeters = getDistanceInMeters(
+              coordinates.latitude,
+              coordinates.longitude,
+              alertDocument.latitude,
+              alertDocument.longitude
+            );
+
+            return {
+              ...alertDocument,
+              distanceInMeters,
+              isOwnAlert: alertDocument.creatorId === user.uid,
+            } satisfies NearbySosAlert;
+          })
+          .filter((alertDocument) => alertDocument.isOwnAlert || alertDocument.distanceInMeters <= alertDocument.radiusMeters)
+          .sort((left, right) => {
+            if (left.isOwnAlert && !right.isOwnAlert) {
+              return -1;
+            }
+
+            if (!left.isOwnAlert && right.isOwnAlert) {
+              return 1;
+            }
+
+            return left.distanceInMeters - right.distanceInMeters;
+          });
+
+        setNearbyAlerts(nextAlerts);
+        setAlertsError('');
+        setIsLoadingAlerts(false);
+      },
+      (error) => {
+        console.error('Failed to load SOS alerts.', error);
+        setAlertsError(
+          'Unable to load SOS alerts. Make sure signed-in users can read the sosAlerts collection.'
+        );
+        setIsLoadingAlerts(false);
+      }
+    );
+
+    return unsubscribe;
+  }, [coordinates, user]);
+
+  const activeOwnAlert = useMemo(
+    () => nearbyAlerts.find((alertDocument) => alertDocument.isOwnAlert) ?? null,
+    [nearbyAlerts]
+  );
+
+  const visibleEmergencyAlerts = useMemo(
+    () => nearbyAlerts.filter((alertDocument) => !alertDocument.isOwnAlert),
+    [nearbyAlerts]
+  );
+
+  const handleTriggerSos = useCallback(async () => {
+    if (!user || !userProfile) {
+      Alert.alert('Unable to send SOS', 'Your account is still loading. Please try again.');
+      return;
+    }
+
+    if (!coordinates) {
+      Alert.alert(
+        'Location needed',
+        'Turn on location and refresh your position before sending an SOS alert.'
+      );
+      return;
+    }
+
+    try {
+      setIsSubmittingSos(true);
+
+      await setDoc(
+        doc(db, 'sosAlerts', user.uid),
+        {
+          anonymousName:
+            userProfile.anonymousName ?? getFallbackAnonymousName(userProfile.role, user.uid),
+          createdAt: serverTimestamp(),
+          creatorId: user.uid,
+          expiresAt: getSosExpiryTimestamp(),
+          latitude: coordinates.latitude,
+          longitude: coordinates.longitude,
+          radiusMeters: selectedRadiusMeters,
+          role: userProfile.role,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      Alert.alert(
+        'SOS sent',
+        `Signed-in users within ${formatRadiusLabel(selectedRadiusMeters)} can now see your emergency alert.`
+      );
+    } catch (error) {
+      console.error('Failed to send SOS alert.', error);
+      Alert.alert(
+        'Unable to send SOS',
+        'Please check your Firestore sosAlerts rules and try again.'
+      );
+    } finally {
+      setIsSubmittingSos(false);
+    }
+  }, [coordinates, selectedRadiusMeters, user, userProfile]);
+
+  const handleCancelSos = useCallback(async () => {
+    if (!user) {
+      return;
+    }
+
+    try {
+      setIsSubmittingSos(true);
+      await deleteDoc(doc(db, 'sosAlerts', user.uid));
+    } catch (error) {
+      console.error('Failed to cancel SOS alert.', error);
+      Alert.alert(
+        'Unable to cancel SOS',
+        'Please try again in a moment. Your active alert is still visible until then.'
+      );
+    } finally {
+      setIsSubmittingSos(false);
+    }
+  }, [user]);
 
   return (
-    <ScrollView
-      bounces={false}
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-      style={styles.screen}>
-      <View style={styles.heroCard}>
-        <Text style={styles.badge}>Nearby users</Text>
-        <Text style={styles.title}>People within 500 meters.</Text>
-        <Text style={styles.subtitle}>
-          This list excludes your own account and only shows users with saved location data close
-          to your current position.
-        </Text>
-      </View>
+    <AppScrollScreen>
+      <HeroPanel
+        badge="Nearby"
+        title="People around you"
+        subtitle={`Browse locals and visitors inside your ${formatRadiusLabel(selectedRadiusMeters)} radius, or send an SOS if you need urgent help.`}
+        aside={
+          <View style={styles.heroAside}>
+            <Text style={styles.heroCount}>{nearbyUsers.length}</Text>
+            <Text style={styles.heroCountLabel}>found</Text>
+          </View>
+        }
+      />
 
-      <View style={styles.detailCard}>
-        <Text style={styles.sectionLabel}>Your location status</Text>
-        <Text style={styles.detailLabel}>Permission</Text>
-        <Text style={styles.detailValue}>{permissionStatus ?? 'Checking permission...'}</Text>
-        <Text style={styles.detailLabel}>Latitude</Text>
-        <Text style={styles.detailValue}>
-          {coordinates ? coordinates.latitude.toFixed(6) : 'Not available'}
-        </Text>
-        <Text style={styles.detailLabel}>Longitude</Text>
-        <Text style={styles.detailValue}>
-          {coordinates ? coordinates.longitude.toFixed(6) : 'Not available'}
-        </Text>
-        {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
-      </View>
+      <SurfaceCard>
+        <SectionHeader
+          kicker="Radius"
+          title="Adjust your discovery range"
+          subtitle="Choose how far NearNative should look when showing nearby locals and travellers."
+        />
+        <View style={styles.radiusWrap}>
+          {RADIUS_OPTIONS_METERS.map((radiusOption) => {
+            const isActive = radiusOption === selectedRadiusMeters;
 
-      <View style={styles.detailCard}>
-        <Text style={styles.sectionLabel}>Visible people nearby</Text>
-        <Text style={styles.helperText}>
-          {isLoadingUsers
-            ? 'Refreshing nearby users...'
-            : `${nearbyUsers.length} user${nearbyUsers.length === 1 ? '' : 's'} found within ${NEARBY_RADIUS_METERS} meters`}
-        </Text>
+            return (
+              <Pressable
+                key={radiusOption}
+                onPress={() => setSelectedRadiusMeters(radiusOption)}
+                style={[styles.radiusChip, isActive ? styles.radiusChipActive : null]}>
+                <Text
+                  style={[
+                    styles.radiusChipText,
+                    isActive ? styles.radiusChipTextActive : null,
+                  ]}>
+                  {formatRadiusLabel(radiusOption)}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </SurfaceCard>
 
-        {usersError ? <Text style={styles.errorText}>{usersError}</Text> : null}
+      <SurfaceCard>
+        <SectionHeader
+          kicker="Emergency"
+          title="SOS assistance"
+          subtitle="Send a time-limited emergency alert to signed-in users around you. Nearby users can open a private support chat immediately."
+        />
 
-        {!isLoadingUsers && !usersError && nearbyUsers.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>No nearby users yet</Text>
-            <Text style={styles.emptyText}>
-              Ask another account to sign in nearby with location enabled, then refresh this screen.
-            </Text>
+        {alertsError ? <Text style={styles.errorText}>{alertsError}</Text> : null}
+        {isLoadingAlerts ? <LoadingCard label="Checking active SOS alerts..." /> : null}
+
+        {activeOwnAlert ? (
+          <View style={[styles.sosCard, styles.ownSosCard]}>
+            <View style={styles.sosTopRow}>
+              <View style={styles.sosTextWrap}>
+                <Text style={styles.sosTitle}>Your SOS alert is live</Text>
+                <Text style={styles.sosDescription}>
+                  Nearby users inside {formatRadiusLabel(activeOwnAlert.radiusMeters)} can see your
+                  request for help right now.
+                </Text>
+              </View>
+              <Pill label="Active" tone="danger" />
+            </View>
+            <ActionButton
+              label="Cancel SOS alert"
+              loading={isSubmittingSos}
+              onPress={() => {
+                void handleCancelSos();
+              }}
+              tone="danger"
+            />
+          </View>
+        ) : (
+          <View style={[styles.sosCard, styles.sendSosCard]}>
+            <View style={styles.sosTopRow}>
+              <View style={styles.sosTextWrap}>
+                <Text style={styles.sosTitle}>Need urgent help?</Text>
+                <Text style={styles.sosDescription}>
+                  This sends an alert to nearby signed-in locals and travellers within your current
+                  radius.
+                </Text>
+              </View>
+              <Pill label="SOS" tone="danger" />
+            </View>
+            <ActionButton
+              label={`Send SOS to ${formatRadiusLabel(selectedRadiusMeters)}`}
+              loading={isSubmittingSos}
+              onPress={() => {
+                void handleTriggerSos();
+              }}
+              tone="danger"
+            />
+          </View>
+        )}
+
+        {!isLoadingAlerts && visibleEmergencyAlerts.length > 0 ? (
+          <View style={styles.emergencyFeed}>
+            <SectionHeader
+              kicker="Live Alerts"
+              title="Nearby emergency requests"
+              subtitle="Open a private chat if you can assist someone nearby."
+            />
+
+            {visibleEmergencyAlerts.map((alertDocument) => (
+              <View key={alertDocument.id} style={styles.alertCard}>
+                <View style={styles.userTopRow}>
+                  <View style={styles.userTitleWrap}>
+                    <Text style={styles.userName}>{alertDocument.anonymousName}</Text>
+                    <Text style={styles.userMeta}>{getRoleLabel(alertDocument.role)}</Text>
+                  </View>
+                  <Pill label={formatApproximateDistance(alertDocument.distanceInMeters)} tone="danger" />
+                </View>
+
+                <Text style={styles.alertText}>
+                  Emergency alert visible within {formatRadiusLabel(alertDocument.radiusMeters)}.
+                </Text>
+
+                <ActionButton
+                  label="Open support chat"
+                  tone="dark"
+                  onPress={() => {
+                    void openDirectChat({
+                      anonymousName: alertDocument.anonymousName,
+                      role: alertDocument.role,
+                      uid: alertDocument.creatorId,
+                    });
+                  }}
+                />
+              </View>
+            ))}
           </View>
         ) : null}
 
-        {nearbyUsers.map((nearbyUser) => (
-          <View key={nearbyUser.uid} style={styles.userCard}>
-            <View style={styles.userHeader}>
-              <Text style={styles.userName}>
-                {nearbyUser.anonymousName ??
-                  getFallbackAnonymousName(nearbyUser.role, nearbyUser.uid)}
-              </Text>
-              <Text style={styles.distanceText}>
-                {formatApproximateDistance(nearbyUser.distanceInMeters)}
-              </Text>
-            </View>
-            <Text style={styles.roleText}>{getRoleLabel(nearbyUser.role)}</Text>
-            <Pressable
-              onPress={async () => {
-                if (!user || !userProfile) {
-                  return;
-                }
+        {!isLoadingAlerts && !alertsError && !activeOwnAlert && visibleEmergencyAlerts.length === 0 ? (
+          <EmptyStateCard
+            title="No active SOS nearby"
+            description="If someone nearby triggers an emergency alert, it will appear here instantly."
+          />
+        ) : null}
+      </SurfaceCard>
 
-                const nextChatId = getDirectChatId(user.uid, nearbyUser.uid);
-                const nextPartnerName =
-                  nearbyUser.anonymousName ??
-                  getFallbackAnonymousName(nearbyUser.role, nearbyUser.uid);
-                const chatRef = doc(db, 'chats', nextChatId);
+      <SurfaceCard>
+        <SectionHeader
+          kicker="Location"
+          title="Your live position"
+          subtitle="Location is refreshed on app open so the nearby list and SOS coverage stay relevant."
+        />
+        <View style={styles.metricsGrid}>
+          <MetricRow label="Permission" value={permissionStatus ?? 'Checking...'} />
+          <MetricRow
+            label="Latitude"
+            value={coordinates ? coordinates.latitude.toFixed(6) : 'Not available'}
+          />
+          <MetricRow
+            label="Longitude"
+            value={coordinates ? coordinates.longitude.toFixed(6) : 'Not available'}
+          />
+        </View>
+        {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
+      </SurfaceCard>
 
-                try {
-                  await setDoc(
-                    chatRef,
-                    {
-                      createdAt: serverTimestamp(),
-                      expiresAt: getChatExpiryTimestamp(),
-                      participantIds: [user.uid, nearbyUser.uid].sort(),
-                      participants: [
-                        buildChatParticipantFromProfile(userProfile),
-                        buildChatParticipantFromRoute(
-                          nearbyUser.uid,
-                          nextPartnerName,
-                          nearbyUser.role
-                        ),
-                      ],
-                      updatedAt: serverTimestamp(),
-                    },
-                    { merge: true }
-                  );
+      <SurfaceCard>
+        <SectionHeader
+          kicker="Nearby List"
+          title="Visible users"
+          subtitle={`${nearbyUsers.length} user${nearbyUsers.length === 1 ? '' : 's'} currently inside your ${formatRadiusLabel(selectedRadiusMeters)} radius`}
+        />
 
-                  router.push(
-                    `/chat/${nextChatId}?partnerId=${encodeURIComponent(nearbyUser.uid)}&partnerName=${encodeURIComponent(nextPartnerName)}&partnerRole=${encodeURIComponent(nearbyUser.role)}` as never
-                  );
-                } catch (error) {
-                  console.error('Failed to create or open chat.', error);
-                  Alert.alert(
-                    'Unable to open chat',
-                    'Please check your Firestore chat rules and try again.'
-                  );
-                }
-              }}
-              style={({ pressed }) => [
-                styles.chatButton,
-                pressed ? styles.chatButtonPressed : null,
-              ]}>
-              <Text style={styles.chatButtonText}>Start anonymous chat</Text>
-            </Pressable>
-          </View>
-        ))}
+        {usersError ? <Text style={styles.errorText}>{usersError}</Text> : null}
 
-        <Pressable
-          disabled={isSyncingLocation || isLoadingUsers}
-          onPress={async () => {
-            await refreshLocation();
-          }}
-          style={({ pressed }) => [
-            styles.refreshButton,
-            pressed && !isSyncingLocation && !isLoadingUsers ? styles.refreshButtonPressed : null,
-            isSyncingLocation || isLoadingUsers ? styles.refreshButtonDisabled : null,
-          ]}>
-          {isSyncingLocation || isLoadingUsers ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.refreshButtonText}>Refresh nearby users</Text>
-          )}
-        </Pressable>
-      </View>
-    </ScrollView>
+        {isLoadingUsers ? <LoadingCard label="Refreshing nearby users..." /> : null}
+
+        {!isLoadingUsers && !usersError && nearbyUsers.length === 0 ? (
+          <EmptyStateCard
+            title="No nearby users yet"
+            description="Ask another account to sign in nearby with location enabled, then refresh this screen."
+          />
+        ) : null}
+
+        {!isLoadingUsers &&
+          nearbyUsers.map((nearbyUser) => {
+            const partnerName =
+              nearbyUser.anonymousName ?? getFallbackAnonymousName(nearbyUser.role, nearbyUser.uid);
+
+            return (
+              <View key={nearbyUser.uid} style={styles.userCard}>
+                <View style={styles.userTopRow}>
+                  <View style={styles.userTitleWrap}>
+                    <Text style={styles.userName}>{partnerName}</Text>
+                    <Text style={styles.userMeta}>{getRoleLabel(nearbyUser.role)}</Text>
+                  </View>
+                  <Pill label={formatApproximateDistance(nearbyUser.distanceInMeters)} />
+                </View>
+
+                <ActionButton
+                  label="Start anonymous chat"
+                  tone="dark"
+                  onPress={() => {
+                    void openDirectChat({
+                      anonymousName: nearbyUser.anonymousName,
+                      role: nearbyUser.role,
+                      uid: nearbyUser.uid,
+                    });
+                  }}
+                />
+              </View>
+            );
+          })}
+
+        <View style={styles.refreshRow}>
+          <ActionButton
+            label="Refresh nearby users"
+            loading={isSyncingLocation || isLoadingUsers}
+            onPress={() => {
+              void refreshLocation();
+            }}
+          />
+        </View>
+      </SurfaceCard>
+    </AppScrollScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  badge: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#e8f1ff',
-    borderRadius: 999,
-    color: '#1565c0',
-    fontSize: 13,
-    fontWeight: '700',
-    marginBottom: 14,
-    overflow: 'hidden',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  chatButton: {
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    backgroundColor: '#0f172a',
-    borderRadius: 14,
-    justifyContent: 'center',
-    marginTop: 12,
-    minHeight: 42,
-    paddingHorizontal: 14,
-  },
-  chatButtonPressed: {
-    opacity: 0.9,
-  },
-  chatButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  content: {
-    padding: 22,
-    paddingTop: 74,
-    paddingBottom: 36,
-  },
-  detailCard: {
-    backgroundColor: '#fff',
-    borderColor: '#dbe4ee',
-    borderRadius: 24,
+  alertCard: {
+    backgroundColor: AppTheme.colors.cardAlt,
+    borderColor: AppTheme.colors.border,
+    borderRadius: 22,
     borderWidth: 1,
-    gap: 10,
-    padding: 22,
+    gap: 14,
+    marginTop: 14,
+    padding: 16,
   },
-  detailLabel: {
-    color: '#64748b',
-    fontSize: 13,
-    fontWeight: '700',
-    marginTop: 2,
-    textTransform: 'uppercase',
+  alertText: {
+    color: AppTheme.colors.muted,
+    fontSize: 14,
+    lineHeight: 22,
   },
-  detailValue: {
-    color: '#0f172a',
-    fontSize: 15,
-    fontWeight: '600',
+  emergencyFeed: {
+    marginTop: 18,
   },
   errorText: {
-    color: '#c62828',
+    color: AppTheme.colors.danger,
     fontSize: 14,
     lineHeight: 20,
-    marginTop: 8,
+    marginTop: 10,
   },
-  emptyState: {
-    backgroundColor: '#f8fafc',
-    borderRadius: 18,
-    marginTop: 6,
-    padding: 16,
-  },
-  emptyText: {
-    color: '#64748b',
-    fontSize: 14,
-    lineHeight: 22,
-    marginTop: 6,
-  },
-  emptyTitle: {
-    color: '#0f172a',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  heroCard: {
-    backgroundColor: '#0f172a',
-    borderRadius: 28,
-    marginBottom: 18,
-    padding: 24,
-  },
-  helperText: {
-    color: '#64748b',
-    fontSize: 14,
-    lineHeight: 22,
-  },
-  refreshButton: {
+  heroAside: {
     alignItems: 'center',
-    alignSelf: 'flex-start',
-    backgroundColor: '#1565c0',
-    borderRadius: 16,
-    justifyContent: 'center',
-    marginTop: 12,
-    minHeight: 48,
-    paddingHorizontal: 18,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 22,
+    minWidth: 92,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
   },
-  refreshButtonDisabled: {
-    opacity: 0.75,
-  },
-  refreshButtonPressed: {
-    opacity: 0.92,
-  },
-  refreshButtonText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  screen: {
-    backgroundColor: '#f4f8fc',
-    flex: 1,
-  },
-  sectionLabel: {
-    color: '#0f172a',
-    fontSize: 18,
-    fontWeight: '800',
-    marginBottom: 2,
-  },
-  subtitle: {
-    color: '#cbd5e1',
-    fontSize: 15,
-    lineHeight: 24,
-  },
-  title: {
-    color: '#fff',
+  heroCount: {
+    color: AppTheme.colors.white,
     fontSize: 28,
     fontWeight: '800',
-    marginBottom: 10,
   },
-  distanceText: {
-    color: '#1565c0',
-    fontSize: 13,
+  heroCountLabel: {
+    color: AppTheme.colors.darkMuted,
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  metricsGrid: {
+    gap: 14,
+    marginTop: 16,
+  },
+  ownSosCard: {
+    backgroundColor: AppTheme.colors.dangerSoft,
+    borderColor: '#f4b5b5',
+  },
+  radiusChip: {
+    backgroundColor: AppTheme.colors.cardAlt,
+    borderColor: AppTheme.colors.border,
+    borderRadius: AppTheme.radius.pill,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  radiusChipActive: {
+    backgroundColor: AppTheme.colors.accent,
+    borderColor: AppTheme.colors.accent,
+  },
+  radiusChipText: {
+    color: AppTheme.colors.muted,
+    fontSize: 14,
     fontWeight: '700',
   },
-  roleText: {
-    color: '#64748b',
-    fontSize: 14,
-    fontWeight: '600',
-    marginTop: 6,
+  radiusChipTextActive: {
+    color: AppTheme.colors.white,
   },
-  userCard: {
-    backgroundColor: '#f8fafc',
-    borderColor: '#e2e8f0',
-    borderRadius: 18,
+  radiusWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 16,
+  },
+  refreshRow: {
+    marginTop: 16,
+  },
+  sendSosCard: {
+    marginTop: 16,
+  },
+  sosCard: {
+    borderRadius: 24,
     borderWidth: 1,
-    marginTop: 12,
+    gap: 14,
+    marginTop: 16,
     padding: 16,
   },
-  userHeader: {
+  sosDescription: {
+    color: AppTheme.colors.muted,
+    fontSize: 14,
+    lineHeight: 22,
+    marginTop: 6,
+  },
+  sosTextWrap: {
+    flex: 1,
+    marginRight: 12,
+  },
+  sosTitle: {
+    color: AppTheme.colors.text,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  sosTopRow: {
     alignItems: 'center',
     flexDirection: 'row',
-    justifyContent: 'space-between',
+  },
+  userCard: {
+    backgroundColor: AppTheme.colors.cardAlt,
+    borderColor: AppTheme.colors.border,
+    borderRadius: 22,
+    borderWidth: 1,
+    gap: 14,
+    marginTop: 14,
+    padding: 16,
+  },
+  userMeta: {
+    color: AppTheme.colors.muted,
+    fontSize: 14,
+    marginTop: 4,
   },
   userName: {
-    color: '#0f172a',
-    flex: 1,
-    fontSize: 17,
+    color: AppTheme.colors.text,
+    fontSize: 18,
     fontWeight: '800',
+  },
+  userTitleWrap: {
+    flex: 1,
     marginRight: 12,
+  },
+  userTopRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
   },
 });

@@ -1,15 +1,19 @@
 import { useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 
+import {
+  ActionButton,
+  AppScrollScreen,
+  EmptyStateCard,
+  HeroPanel,
+  LoadingCard,
+  Pill,
+  SectionHeader,
+  SurfaceCard,
+} from '@/components/ui/app-primitives';
+import { AppTheme } from '@/constants/theme';
 import { useAuth } from '@/contexts/auth-context';
 import { getOtherParticipant, getTimestampMillis, isTimestampExpired } from '@/lib/chat';
 import { db } from '@/lib/firebase';
@@ -63,200 +67,135 @@ export default function ChatsScreen() {
   }, [user]);
 
   return (
-    <ScrollView
-      bounces={false}
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-      style={styles.screen}>
-      <View style={styles.heroCard}>
-        <Text style={styles.badge}>Anonymous chats</Text>
-        <Text style={styles.title}>Your active conversations.</Text>
-        <Text style={styles.subtitle}>
-          Chats update in real time and stay visible for 48 hours from the latest message.
-        </Text>
-      </View>
+    <AppScrollScreen>
+      <HeroPanel
+        badge="Chats"
+        title="Active conversations"
+        subtitle="Your anonymous conversations update in real time and stay visible for 48 hours from the latest message."
+        aside={
+          <View style={styles.heroAside}>
+            <Text style={styles.heroCount}>{chats.length}</Text>
+            <Text style={styles.heroCountLabel}>active</Text>
+          </View>
+        }
+      />
 
-      <View style={styles.listCard}>
-        <Text style={styles.sectionTitle}>Chat list</Text>
-        <Text style={styles.helperText}>
-          {isLoadingChats
-            ? 'Loading your conversations...'
-            : `${chats.length} active chat${chats.length === 1 ? '' : 's'}`}
-        </Text>
+      <SurfaceCard>
+        <SectionHeader
+          kicker="Inbox"
+          title="Chat list"
+          subtitle="Open any conversation to continue where you left off."
+        />
 
         {chatError ? <Text style={styles.errorText}>{chatError}</Text> : null}
 
-        {isLoadingChats ? (
-          <View style={styles.loaderWrap}>
-            <ActivityIndicator color="#1565c0" />
-          </View>
-        ) : null}
+        {isLoadingChats ? <LoadingCard label="Loading your conversations..." /> : null}
 
         {!isLoadingChats && !chatError && chats.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>No chats yet</Text>
-            <Text style={styles.emptyText}>
-              Start a conversation from the Nearby tab and it will appear here automatically.
-            </Text>
-          </View>
+          <EmptyStateCard
+            title="No chats yet"
+            description="Start a conversation from the Nearby tab and it will appear here automatically."
+          />
         ) : null}
 
-        {chats.map((chat) => {
-          const partner = getOtherParticipant(chat, user?.uid ?? '');
+        {!isLoadingChats &&
+          chats.map((chat) => {
+            const partner = getOtherParticipant(chat, user?.uid ?? '');
 
-          if (!partner || !partner.uid) {
-            return null;
-          }
+            if (!partner || !partner.uid) {
+              return null;
+            }
 
-          return (
-            <Pressable
-              key={chat.id}
-              onPress={() => {
-                router.push(
-                  `/chat/${chat.id}?partnerId=${encodeURIComponent(partner.uid)}&partnerName=${encodeURIComponent(partner.anonymousName)}&partnerRole=${encodeURIComponent(partner.role)}` as never
-                );
-              }}
-              style={({ pressed }) => [
-                styles.chatRow,
-                pressed ? styles.chatRowPressed : null,
-              ]}>
-              <View style={styles.chatRowTextWrap}>
-                <Text style={styles.chatName}>{partner.anonymousName}</Text>
-                <Text style={styles.chatRole}>{partner.role === 'local' ? 'Local' : 'Visitor'}</Text>
-                <Text numberOfLines={1} style={styles.chatPreview}>
+            return (
+              <View key={chat.id} style={styles.chatCard}>
+                <View style={styles.chatTopRow}>
+                  <View style={styles.chatTextWrap}>
+                    <Text style={styles.chatName}>{partner.anonymousName}</Text>
+                    <Text style={styles.chatRole}>
+                      {partner.role === 'local' ? 'Local' : 'Visitor'}
+                    </Text>
+                  </View>
+                  <Pill label="Live" tone="neutral" />
+                </View>
+
+                <Text numberOfLines={2} style={styles.previewText}>
                   {chat.lastMessageText ?? 'No messages yet'}
                 </Text>
+
+                <ActionButton
+                  label="Open chat"
+                  tone="ghost"
+                  onPress={() => {
+                    router.push(
+                      `/chat/${chat.id}?partnerId=${encodeURIComponent(partner.uid)}&partnerName=${encodeURIComponent(partner.anonymousName)}&partnerRole=${encodeURIComponent(partner.role)}` as never
+                    );
+                  }}
+                />
               </View>
-              <Text style={styles.openLabel}>Open</Text>
-            </Pressable>
-          );
-        })}
-      </View>
-    </ScrollView>
+            );
+          })}
+      </SurfaceCard>
+    </AppScrollScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  badge: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#e8f1ff',
-    borderRadius: 999,
-    color: '#1565c0',
-    fontSize: 13,
-    fontWeight: '700',
-    marginBottom: 14,
-    overflow: 'hidden',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  chatName: {
-    color: '#0f172a',
-    fontSize: 17,
-    fontWeight: '800',
-  },
-  chatPreview: {
-    color: '#64748b',
-    fontSize: 14,
-    marginTop: 8,
-  },
-  chatRole: {
-    color: '#1565c0',
-    fontSize: 13,
-    fontWeight: '700',
-    marginTop: 4,
-  },
-  chatRow: {
-    alignItems: 'center',
-    backgroundColor: '#f8fafc',
-    borderColor: '#e2e8f0',
-    borderRadius: 18,
+  chatCard: {
+    backgroundColor: AppTheme.colors.cardAlt,
+    borderColor: AppTheme.colors.border,
+    borderRadius: 22,
     borderWidth: 1,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 12,
+    gap: 14,
+    marginTop: 14,
     padding: 16,
   },
-  chatRowPressed: {
-    opacity: 0.92,
+  chatName: {
+    color: AppTheme.colors.text,
+    fontSize: 18,
+    fontWeight: '800',
   },
-  chatRowTextWrap: {
+  chatRole: {
+    color: AppTheme.colors.muted,
+    fontSize: 14,
+    marginTop: 4,
+  },
+  chatTextWrap: {
     flex: 1,
     marginRight: 12,
   },
-  content: {
-    padding: 22,
-    paddingTop: 74,
-    paddingBottom: 36,
-  },
-  emptyState: {
-    backgroundColor: '#f8fafc',
-    borderRadius: 18,
-    marginTop: 12,
-    padding: 16,
-  },
-  emptyText: {
-    color: '#64748b',
-    fontSize: 14,
-    lineHeight: 22,
-    marginTop: 6,
-  },
-  emptyTitle: {
-    color: '#0f172a',
-    fontSize: 16,
-    fontWeight: '700',
+  chatTopRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
   },
   errorText: {
-    color: '#c62828',
+    color: AppTheme.colors.danger,
     fontSize: 14,
     lineHeight: 20,
     marginTop: 10,
   },
-  helperText: {
-    color: '#64748b',
-    fontSize: 14,
-    lineHeight: 22,
-  },
-  heroCard: {
-    backgroundColor: '#0f172a',
-    borderRadius: 28,
-    marginBottom: 18,
-    padding: 24,
-  },
-  listCard: {
-    backgroundColor: '#fff',
-    borderColor: '#dbe4ee',
-    borderRadius: 24,
-    borderWidth: 1,
-    padding: 22,
-  },
-  loaderWrap: {
+  heroAside: {
     alignItems: 'center',
-    paddingVertical: 24,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 22,
+    minWidth: 92,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
   },
-  openLabel: {
-    color: '#1565c0',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  screen: {
-    backgroundColor: '#f4f8fc',
-    flex: 1,
-  },
-  sectionTitle: {
-    color: '#0f172a',
-    fontSize: 18,
-    fontWeight: '800',
-    marginBottom: 2,
-  },
-  subtitle: {
-    color: '#cbd5e1',
-    fontSize: 15,
-    lineHeight: 24,
-  },
-  title: {
-    color: '#fff',
+  heroCount: {
+    color: AppTheme.colors.white,
     fontSize: 28,
     fontWeight: '800',
-    marginBottom: 10,
+  },
+  heroCountLabel: {
+    color: AppTheme.colors.darkMuted,
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  previewText: {
+    color: AppTheme.colors.muted,
+    fontSize: 14,
+    lineHeight: 22,
   },
 });

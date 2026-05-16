@@ -1,6 +1,17 @@
 import type { PropsWithChildren } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import {
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { AppTheme } from '@/constants/theme';
 
 type AuthShellProps = PropsWithChildren<{
   badge: string;
@@ -9,6 +20,22 @@ type AuthShellProps = PropsWithChildren<{
 }>;
 
 export function AuthShell({ badge, title, subtitle, children }: AuthShellProps) {
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+
+  useEffect(() => {
+    const showSubscription = Keyboard.addListener('keyboardDidShow', () => {
+      setIsKeyboardVisible(true);
+    });
+    const hideSubscription = Keyboard.addListener('keyboardDidHide', () => {
+      setIsKeyboardVisible(false);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View pointerEvents="none" style={styles.background}>
@@ -17,11 +44,17 @@ export function AuthShell({ badge, title, subtitle, children }: AuthShellProps) 
       </View>
 
       <KeyboardAvoidingView
-        behavior={Platform.select({ ios: 'padding', default: undefined })}
+        behavior={Platform.select({ ios: 'padding', android: 'height', default: undefined })}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
         style={styles.flex}>
         <ScrollView
+          automaticallyAdjustKeyboardInsets
           bounces={false}
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[
+            styles.content,
+            isKeyboardVisible ? styles.contentKeyboardVisible : styles.contentCentered,
+          ]}
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
           <View style={styles.hero}>
@@ -40,7 +73,7 @@ export function AuthShell({ badge, title, subtitle, children }: AuthShellProps) 
 
 const styles = StyleSheet.create({
   accentOne: {
-    backgroundColor: '#d5ecff',
+    backgroundColor: '#d9ebff',
     borderRadius: 180,
     height: 280,
     position: 'absolute',
@@ -49,7 +82,7 @@ const styles = StyleSheet.create({
     width: 280,
   },
   accentTwo: {
-    backgroundColor: '#eff7ff',
+    backgroundColor: '#edf5ff',
     borderRadius: 120,
     height: 200,
     left: -40,
@@ -59,42 +92,46 @@ const styles = StyleSheet.create({
   },
   background: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#f4f8fc',
+    backgroundColor: AppTheme.colors.background,
   },
   badge: {
     alignSelf: 'flex-start',
-    backgroundColor: '#fff',
+    backgroundColor: AppTheme.colors.card,
     borderRadius: 999,
-    color: '#1565c0',
-    fontSize: 13,
-    fontWeight: '700',
+    color: AppTheme.colors.accent,
+    fontSize: 12,
+    fontWeight: '800',
     marginBottom: 14,
     overflow: 'hidden',
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
   brand: {
-    color: '#0f172a',
+    color: AppTheme.colors.text,
     fontSize: 18,
     fontWeight: '800',
     letterSpacing: 0.3,
     marginBottom: 20,
   },
   card: {
-    backgroundColor: '#fff',
-    borderColor: '#e2e8f0',
-    borderRadius: 28,
+    backgroundColor: AppTheme.colors.card,
+    borderColor: AppTheme.colors.border,
+    borderRadius: 30,
     borderWidth: 1,
     padding: 24,
-    shadowColor: '#0f172a',
-    shadowOffset: { width: 0, height: 18 },
-    shadowOpacity: 0.08,
-    shadowRadius: 24,
+    ...AppTheme.shadow.card,
   },
   content: {
     flexGrow: 1,
-    justifyContent: 'center',
     padding: 22,
+    paddingBottom: 34,
+  },
+  contentCentered: {
+    justifyContent: 'center',
+  },
+  contentKeyboardVisible: {
+    justifyContent: 'flex-start',
+    paddingTop: 28,
   },
   flex: {
     flex: 1,
@@ -103,17 +140,17 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   safeArea: {
-    backgroundColor: '#f4f8fc',
+    backgroundColor: AppTheme.colors.background,
     flex: 1,
   },
   subtitle: {
-    color: '#475569',
+    color: AppTheme.colors.muted,
     fontSize: 15,
     lineHeight: 24,
     maxWidth: 420,
   },
   title: {
-    color: '#0f172a',
+    color: AppTheme.colors.text,
     fontSize: 32,
     fontWeight: '800',
     lineHeight: 38,

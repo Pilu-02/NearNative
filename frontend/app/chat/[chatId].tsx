@@ -1,16 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import {
   addDoc,
@@ -23,6 +21,8 @@ import {
   setDoc,
 } from 'firebase/firestore';
 
+import { ActionButton, EmptyStateCard, LoadingCard, Pill } from '@/components/ui/app-primitives';
+import { AppTheme } from '@/constants/theme';
 import { useAuth } from '@/contexts/auth-context';
 import { useUserProfile } from '@/contexts/user-profile-context';
 import {
@@ -40,6 +40,7 @@ function normalizeRole(value: string | string[] | undefined): UserRole {
 }
 
 export default function ChatScreen() {
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{
     chatId: string;
     partnerId?: string;
@@ -170,61 +171,60 @@ export default function ChatScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
-        behavior={Platform.select({ ios: 'padding', default: undefined })}
+        behavior={Platform.select({ ios: 'padding', android: 'height', default: undefined })}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
         style={styles.flex}>
-        <View style={styles.header}>
-          <Pressable onPress={() => router.back()} style={styles.backButton}>
-            <Text style={styles.backButtonText}>Back</Text>
-          </Pressable>
-          <View style={styles.headerTextWrap}>
+        <View style={styles.headerShell}>
+          <View style={styles.headerCard}>
+            <View style={styles.headerTopRow}>
+              <ActionButton label="Back" tone="ghost" onPress={() => router.back()} />
+              <Pill label={partner.role === 'local' ? 'Local' : 'Visitor'} tone="neutral" />
+            </View>
             <Text style={styles.headerTitle}>{partner.anonymousName}</Text>
             <Text style={styles.headerSubtitle}>
-              {partner.role === 'local' ? 'Local' : 'Visitor'} anonymous chat
+              Private anonymous chat with real-time updates and 48 hour expiry.
             </Text>
           </View>
         </View>
 
         <ScrollView
+          automaticallyAdjustKeyboardInsets
           contentContainerStyle={styles.messagesContent}
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+          keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           style={styles.messagesArea}>
-          {isLoadingMessages ? (
-            <View style={styles.loaderWrap}>
-              <ActivityIndicator color="#1565c0" />
-              <Text style={styles.helperText}>Loading messages...</Text>
-            </View>
-          ) : null}
+          {isLoadingMessages ? <LoadingCard label="Loading messages..." /> : null}
 
           {!isLoadingMessages && messages.length === 0 && !chatError ? (
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>Start the conversation</Text>
-              <Text style={styles.emptyText}>
-                This is a private anonymous one-to-one chat. Messages update in real time and expire after 48 hours.
-              </Text>
-            </View>
+            <EmptyStateCard
+              title="Start the conversation"
+              description="Send the first message and this chat will update live on both devices."
+            />
           ) : null}
 
-          {messages.map((message) => {
-            const isOwnMessage = message.senderId === user?.uid;
+          {!isLoadingMessages &&
+            messages.map((message) => {
+              const isOwnMessage = message.senderId === user?.uid;
 
-            return (
-              <View
-                key={message.id}
-                style={[
-                  styles.messageBubble,
-                  isOwnMessage ? styles.ownMessageBubble : styles.otherMessageBubble,
-                ]}>
-                <Text style={isOwnMessage ? styles.ownMessageText : styles.otherMessageText}>
-                  {message.text}
-                </Text>
-              </View>
-            );
-          })}
+              return (
+                <View
+                  key={message.id}
+                  style={[
+                    styles.messageBubble,
+                    isOwnMessage ? styles.ownMessageBubble : styles.otherMessageBubble,
+                  ]}>
+                  <Text style={isOwnMessage ? styles.ownMessageText : styles.otherMessageText}>
+                    {message.text}
+                  </Text>
+                </View>
+              );
+            })}
         </ScrollView>
 
         {chatError ? <Text style={styles.errorText}>{chatError}</Text> : null}
         {isExpired ? (
-          <Text style={styles.errorText}>
+          <Text style={styles.warningText}>
             This chat expired after 48 hours. Sending a new message will start it again.
           </Text>
         ) : null}
@@ -232,28 +232,27 @@ export default function ChatScreen() {
           <Text style={styles.helperText}>Preparing your anonymous profile...</Text>
         ) : null}
 
-        <View style={styles.composer}>
-          <TextInput
-            editable={!isSending && !isProfileLoading}
-            multiline
-            onChangeText={setMessageText}
-            placeholder="Type your message..."
-            placeholderTextColor="#94a3b8"
-            style={styles.input}
-            value={messageText}
-          />
-          <Pressable
-            disabled={isSending || isProfileLoading || !messageText.trim()}
-            onPress={() => {
-              void handleSendMessage();
-            }}
-            style={({ pressed }) => [
-              styles.sendButton,
-              pressed && !isSending ? styles.sendButtonPressed : null,
-              isSending || isProfileLoading || !messageText.trim() ? styles.sendButtonDisabled : null,
-            ]}>
-            {isSending ? <ActivityIndicator color="#fff" /> : <Text style={styles.sendButtonText}>Send</Text>}
-          </Pressable>
+        <View style={[styles.composerShell, { paddingBottom: Math.max(insets.bottom, 14) }]}>
+          <View style={styles.composer}>
+            <TextInput
+              editable={!isSending && !isProfileLoading}
+              multiline
+              onChangeText={setMessageText}
+              placeholder="Type your message..."
+              placeholderTextColor="#94a3b8"
+              style={styles.input}
+              textAlignVertical="top"
+              value={messageText}
+            />
+            <ActionButton
+              disabled={!messageText.trim()}
+              label="Send"
+              loading={isSending}
+              onPress={() => {
+                void handleSendMessage();
+              }}
+            />
+          </View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -261,159 +260,126 @@ export default function ChatScreen() {
 }
 
 const styles = StyleSheet.create({
-  backButton: {
-    alignItems: 'center',
-    backgroundColor: '#e8f1ff',
-    borderRadius: 999,
-    justifyContent: 'center',
-    minHeight: 40,
-    paddingHorizontal: 14,
-  },
-  backButtonText: {
-    color: '#1565c0',
-    fontSize: 14,
-    fontWeight: '700',
-  },
   composer: {
     alignItems: 'flex-end',
-    backgroundColor: '#fff',
-    borderTopColor: '#dbe4ee',
-    borderTopWidth: 1,
+    backgroundColor: AppTheme.colors.card,
+    borderColor: AppTheme.colors.border,
+    borderRadius: 28,
+    borderWidth: 1,
     flexDirection: 'row',
     gap: 12,
-    padding: 16,
+    padding: 14,
+    ...AppTheme.shadow.card,
   },
-  emptyCard: {
-    backgroundColor: '#fff',
-    borderColor: '#dbe4ee',
-    borderRadius: 24,
-    borderWidth: 1,
-    padding: 18,
-  },
-  emptyText: {
-    color: '#64748b',
-    fontSize: 14,
-    lineHeight: 22,
-    marginTop: 6,
-  },
-  emptyTitle: {
-    color: '#0f172a',
-    fontSize: 17,
-    fontWeight: '800',
+  composerShell: {
+    backgroundColor: AppTheme.colors.background,
+    paddingHorizontal: 16,
+    paddingTop: 8,
   },
   errorText: {
-    color: '#c62828',
+    color: AppTheme.colors.danger,
     fontSize: 14,
     lineHeight: 20,
     paddingHorizontal: 16,
-    paddingTop: 10,
+    paddingTop: 8,
   },
   flex: {
     flex: 1,
   },
-  header: {
-    alignItems: 'center',
-    backgroundColor: '#f4f8fc',
-    flexDirection: 'row',
-    gap: 12,
+  headerCard: {
+    backgroundColor: AppTheme.colors.dark,
+    borderRadius: 30,
+    padding: 20,
+  },
+  headerShell: {
+    backgroundColor: AppTheme.colors.background,
     paddingHorizontal: 16,
     paddingTop: 8,
-    paddingBottom: 14,
   },
   headerSubtitle: {
-    color: '#64748b',
+    color: AppTheme.colors.darkMuted,
     fontSize: 14,
-    marginTop: 4,
-  },
-  headerTextWrap: {
-    flex: 1,
+    lineHeight: 22,
+    marginTop: 8,
   },
   headerTitle: {
-    color: '#0f172a',
-    fontSize: 20,
+    color: AppTheme.colors.white,
+    fontSize: 26,
     fontWeight: '800',
+    marginTop: 14,
+  },
+  headerTopRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
   },
   helperText: {
-    color: '#64748b',
+    color: AppTheme.colors.muted,
     fontSize: 14,
+    paddingHorizontal: 16,
+    paddingTop: 8,
     textAlign: 'center',
   },
   input: {
-    backgroundColor: '#f8fafc',
-    borderColor: '#dbe4ee',
-    borderRadius: 18,
+    backgroundColor: AppTheme.colors.cardAlt,
+    borderColor: AppTheme.colors.border,
+    borderRadius: 20,
     borderWidth: 1,
-    color: '#0f172a',
+    color: AppTheme.colors.text,
     flex: 1,
     fontSize: 15,
     maxHeight: 120,
-    minHeight: 52,
+    minHeight: 54,
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
-  loaderWrap: {
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 24,
-  },
   messageBubble: {
-    borderRadius: 22,
-    marginBottom: 10,
+    borderRadius: 24,
+    marginBottom: 12,
     maxWidth: '82%',
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
   messagesArea: {
-    backgroundColor: '#f4f8fc',
+    backgroundColor: AppTheme.colors.background,
     flex: 1,
   },
   messagesContent: {
+    gap: 4,
     paddingHorizontal: 16,
-    paddingBottom: 24,
-    paddingTop: 8,
+    paddingBottom: 20,
+    paddingTop: 16,
   },
   otherMessageBubble: {
     alignSelf: 'flex-start',
-    backgroundColor: '#fff',
-    borderColor: '#dbe4ee',
+    backgroundColor: AppTheme.colors.card,
+    borderColor: AppTheme.colors.border,
     borderWidth: 1,
   },
   otherMessageText: {
-    color: '#0f172a',
+    color: AppTheme.colors.text,
     fontSize: 15,
     lineHeight: 22,
   },
   ownMessageBubble: {
     alignSelf: 'flex-end',
-    backgroundColor: '#1565c0',
+    backgroundColor: AppTheme.colors.accent,
   },
   ownMessageText: {
-    color: '#fff',
+    color: AppTheme.colors.white,
     fontSize: 15,
     lineHeight: 22,
   },
   safeArea: {
-    backgroundColor: '#f4f8fc',
+    backgroundColor: AppTheme.colors.background,
     flex: 1,
   },
-  sendButton: {
-    alignItems: 'center',
-    backgroundColor: '#1565c0',
-    borderRadius: 16,
-    justifyContent: 'center',
-    minHeight: 52,
-    minWidth: 76,
+  warningText: {
+    color: AppTheme.colors.accentDeep,
+    fontSize: 14,
+    lineHeight: 20,
     paddingHorizontal: 16,
-  },
-  sendButtonDisabled: {
-    opacity: 0.7,
-  },
-  sendButtonPressed: {
-    opacity: 0.9,
-  },
-  sendButtonText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '700',
+    paddingTop: 8,
+    textAlign: 'center',
   },
 });

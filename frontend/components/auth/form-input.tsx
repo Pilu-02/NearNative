@@ -1,20 +1,53 @@
+import { Ionicons } from '@expo/vector-icons';
+import { useState } from 'react';
 import type { TextInputProps } from 'react-native';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 type FormInputProps = TextInputProps & {
   label: string;
   error?: string;
 };
 
-export function FormInput({ error, label, style, ...props }: FormInputProps) {
+export function FormInput({
+  error,
+  label,
+  secureTextEntry,
+  style,
+  ...props
+}: FormInputProps) {
+  const isPasswordField = secureTextEntry === true;
+  const [isPasswordVisible, setIsPasswordVisible] = useState(false);
+
   return (
     <View>
       <Text style={styles.label}>{label}</Text>
-      <TextInput
-        placeholderTextColor="#94a3b8"
-        style={[styles.input, error ? styles.inputError : null, style]}
-        {...props}
-      />
+      <View style={styles.inputWrap}>
+        <TextInput
+          {...props}
+          placeholderTextColor="#94a3b8"
+          secureTextEntry={isPasswordField ? !isPasswordVisible : secureTextEntry}
+          style={[
+            styles.input,
+            isPasswordField ? styles.inputWithTrailingIcon : null,
+            error ? styles.inputError : null,
+            style,
+          ]}
+        />
+        {isPasswordField ? (
+          <Pressable
+            accessibilityLabel={isPasswordVisible ? 'Hide password' : 'Show password'}
+            accessibilityRole="button"
+            hitSlop={10}
+            onPress={() => setIsPasswordVisible((currentValue) => !currentValue)}
+            style={styles.trailingIconButton}>
+            <Ionicons
+              color="#64748b"
+              name={isPasswordVisible ? 'eye-off-outline' : 'eye-outline'}
+              size={20}
+            />
+          </Pressable>
+        ) : null}
+      </View>
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
     </View>
   );
@@ -40,10 +73,24 @@ const styles = StyleSheet.create({
   inputError: {
     borderColor: '#ef4444',
   },
+  inputWithTrailingIcon: {
+    paddingRight: 52,
+  },
+  inputWrap: {
+    position: 'relative',
+  },
   label: {
     color: '#1f2937',
     fontSize: 15,
     fontWeight: '700',
     marginBottom: 10,
+  },
+  trailingIconButton: {
+    alignItems: 'center',
+    bottom: 0,
+    justifyContent: 'center',
+    position: 'absolute',
+    right: 14,
+    top: 0,
   },
 });

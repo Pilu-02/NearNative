@@ -4,7 +4,7 @@ import React from 'react';
 import { HapticTab } from '@/components/haptic-tab';
 import { ScreenLoader } from '@/components/ui/screen-loader';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Colors } from '@/constants/theme';
+import { AppTheme, Colors } from '@/constants/theme';
 import { useAuth } from '@/contexts/auth-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
@@ -25,10 +25,22 @@ export default function TabLayout() {
       screenOptions={{
         tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
         tabBarStyle: {
-          borderTopColor: '#d9e3ef',
-          height: 70,
-          paddingBottom: 10,
-          paddingTop: 10,
+          backgroundColor: AppTheme.colors.card,
+          borderTopColor: 'transparent',
+          borderRadius: 26,
+          bottom: 14,
+          height: 76,
+          left: 14,
+          paddingBottom: 12,
+          paddingTop: 12,
+          position: 'absolute',
+          right: 14,
+          ...AppTheme.shadow.card,
+        },
+        tabBarInactiveTintColor: AppTheme.colors.muted,
+        tabBarLabelStyle: {
+          fontSize: 12,
+          fontWeight: '700',
         },
         headerShown: false,
         tabBarButton: HapticTab,
