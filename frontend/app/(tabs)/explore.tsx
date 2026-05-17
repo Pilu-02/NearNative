@@ -65,56 +65,33 @@ export default function ProfileScreen() {
         </View>
       </SurfaceCard>
 
-      <SurfaceCard>
-        <Text style={styles.sectionTitle}>Verification</Text>
-        <View style={styles.metricsWrap}>
-          <MetricRow label="Email status" value={isEmailVerified ? 'Verified' : 'Pending'} />
-          <MetricRow label="Local status" value={getVerificationLabel(localStatus)} />
-          <MetricRow
-            label="Local access"
-            value={userProfile?.isLocalVerified ? 'Active' : 'Not active yet'}
-          />
-        </View>
+      {/* Verification card removed per request */}
 
-        {requestedRole === 'local' ? (
-          <Text style={styles.helperText}>
-            Local applicants remain on visitor access until the backend team approves the uploaded
-            proof document and address details.
-          </Text>
-        ) : (
-          <Text style={styles.helperText}>
-            You are currently using a visitor account. If you add an admin review flow later, this
-            screen is ready to surface that status too.
-          </Text>
-        )}
-      </SurfaceCard>
-
-      <SurfaceCard>
-        <Text style={styles.sectionTitle}>Session</Text>
-        <Text style={styles.helperText}>
-          Sign out when you want to test another user account or role on this device.
-        </Text>
-        <View style={styles.actionRow}>
-          <ActionButton
-            label="Sign out"
-            tone="dark"
-            onPress={() => {
-              void (async () => {
-                try {
-                  await logout();
-                } catch {
-                  Alert.alert('Logout failed', 'Please try again.');
-                }
-              })();
-            }}
-          />
-        </View>
-      </SurfaceCard>
+      <View style={styles.signOutWrap}>
+        <ActionButton
+          label="Sign out"
+          tone="dark"
+            centered
+          onPress={() => {
+            void (async () => {
+              try {
+                await logout();
+              } catch {
+                Alert.alert('Logout failed', 'Please try again.');
+              }
+            })();
+          }}
+        />
+      </View>
     </AppScrollScreen>
   );
 }
 
 const styles = StyleSheet.create({
+  signOutWrap: {
+    marginTop: 24,
+    alignItems: 'center',
+  },
   actionRow: {
     marginTop: 16,
   },

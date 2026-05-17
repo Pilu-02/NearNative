@@ -118,19 +118,24 @@ export default function ChatsScreen() {
                   <Pill label="Live" tone="neutral" />
                 </View>
 
-                <Text numberOfLines={2} style={styles.previewText}>
-                  {chat.lastMessageText ?? 'No messages yet'}
-                </Text>
+                <View style={styles.chatBottomRow}>
+                  <Text numberOfLines={2} style={styles.previewText}>
+                    {chat.lastMessageText ?? 'No messages yet'}
+                  </Text>
 
-                <ActionButton
-                  label="Open chat"
-                  tone="ghost"
-                  onPress={() => {
-                    router.push(
-                      `/chat/${chat.id}?partnerId=${encodeURIComponent(partner.uid)}&partnerName=${encodeURIComponent(partner.anonymousName)}&partnerRole=${encodeURIComponent(partner.role)}` as never
-                    );
-                  }}
-                />
+                  <View style={styles.openButtonWrap}>
+                    <ActionButton
+                      compact
+                      label="Open chat"
+                      tone="ghost"
+                      onPress={() => {
+                        router.push(
+                          `/chat/${chat.id}?partnerId=${encodeURIComponent(partner.uid)}&partnerName=${encodeURIComponent(partner.anonymousName)}&partnerRole=${encodeURIComponent(partner.role)}` as never
+                        );
+                      }}
+                    />
+                  </View>
+                </View>
               </View>
             );
           })}
@@ -143,11 +148,11 @@ const styles = StyleSheet.create({
   chatCard: {
     backgroundColor: AppTheme.colors.cardAlt,
     borderColor: AppTheme.colors.border,
-    borderRadius: 22,
+    borderRadius: 16,
     borderWidth: 1,
-    gap: 14,
-    marginTop: 14,
-    padding: 16,
+    gap: 10,
+    marginTop: 10,
+    padding: 10,
   },
   chatName: {
     color: AppTheme.colors.text,
@@ -156,8 +161,8 @@ const styles = StyleSheet.create({
   },
   chatRole: {
     color: AppTheme.colors.muted,
-    fontSize: 14,
-    marginTop: 4,
+    fontSize: 13,
+    marginTop: 3,
   },
   chatTextWrap: {
     flex: 1,
@@ -166,6 +171,15 @@ const styles = StyleSheet.create({
   chatTopRow: {
     alignItems: 'center',
     flexDirection: 'row',
+  },
+  chatBottomRow: {
+    marginTop: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  openButtonWrap: {
+    marginLeft: 12,
   },
   errorText: {
     color: AppTheme.colors.danger,
@@ -195,7 +209,8 @@ const styles = StyleSheet.create({
   },
   previewText: {
     color: AppTheme.colors.muted,
-    fontSize: 14,
-    lineHeight: 22,
+    fontSize: 13,
+    lineHeight: 20,
+    flex: 1,
   },
 });

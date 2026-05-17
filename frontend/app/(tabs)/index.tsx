@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Animated, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import {
   collection,
@@ -31,6 +31,7 @@ import {
   buildChatParticipantFromProfile,
   buildChatParticipantFromRoute,
   getChatExpiryTimestamp,
+  getTimestampMillis,
   isTimestampExpired,
 } from '@/lib/chat';
 import { formatApproximateDistance, getDistanceInMeters } from '@/lib/distance';
@@ -51,6 +52,15 @@ type NearbySosAlert = SosAlertDocument & {
   isOwnAlert: boolean;
 };
 
+function getNearbyAlertKey(alertDocument: NearbySosAlert) {
+  return [
+    alertDocument.creatorId,
+    getTimestampMillis(alertDocument.createdAt),
+    getTimestampMillis(alertDocument.expiresAt),
+    alertDocument.radiusMeters,
+  ].join(':');
+}
+
 function getRoleLabel(role: UserRole) {
   return role === 'local' ? 'Local' : 'Visitor';
 }
@@ -63,11 +73,14 @@ export default function HomeScreen() {
   const [selectedRadiusMeters, setSelectedRadiusMeters] = useState(DEFAULT_RADIUS_METERS);
   const [nearbyUsers, setNearbyUsers] = useState<NearbyUser[]>([]);
   const [nearbyAlerts, setNearbyAlerts] = useState<NearbySosAlert[]>([]);
+  const [acknowledgedAlertKeys, setAcknowledgedAlertKeys] = useState<string[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
   const [isLoadingAlerts, setIsLoadingAlerts] = useState(true);
   const [isSubmittingSos, setIsSubmittingSos] = useState(false);
   const [usersError, setUsersError] = useState('');
   const [alertsError, setAlertsError] = useState('');
+  const popupScale = useRef(new Animated.Value(0.96)).current;
+  const popupOpacity = useRef(new Animated.Value(0)).current;
 
   const openDirectChat = useCallback(
     async (partner: Pick<UserProfile, 'anonymousName' | 'role' | 'uid'>) => {
@@ -252,6 +265,45 @@ export default function HomeScreen() {
     [nearbyAlerts]
   );
 
+  const visiblePopupAlert = useMemo(
+    () =>
+      visibleEmergencyAlerts.find(
+        (alertDocument) => !acknowledgedAlertKeys.includes(getNearbyAlertKey(alertDocument))
+      ) ??
+      null,
+    [acknowledgedAlertKeys, visibleEmergencyAlerts]
+  );
+
+  useEffect(() => {
+    if (visibleEmergencyAlerts.length === 0 && acknowledgedAlertKeys.length > 0) {
+      setAcknowledgedAlertKeys([]);
+    }
+  }, [acknowledgedAlertKeys.length, visibleEmergencyAlerts.length]);
+
+  useEffect(() => {
+    if (!visiblePopupAlert) {
+      popupScale.setValue(0.96);
+      popupOpacity.setValue(0);
+      return;
+    }
+
+    popupScale.setValue(0.96);
+    popupOpacity.setValue(0);
+
+    Animated.parallel([
+      Animated.spring(popupScale, {
+        toValue: 1,
+        useNativeDriver: true,
+        bounciness: 8,
+      }),
+      Animated.timing(popupOpacity, {
+        toValue: 1,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [popupOpacity, popupScale, visiblePopupAlert]);
+
   const handleTriggerSos = useCallback(async () => {
     if (!user || !userProfile) {
       Alert.alert('Unable to send SOS', 'Your account is still loading. Please try again.');
@@ -319,6 +371,24 @@ export default function HomeScreen() {
       setIsSubmittingSos(false);
     }
   }, [user]);
+
+  const acknowledgeEmergencyPopup = useCallback((alertDocument: NearbySosAlert) => {
+    const alertKey = getNearbyAlertKey(alertDocument);
+
+    setAcknowledgedAlertKeys((currentAcknowledgedAlertKeys) =>
+      currentAcknowledgedAlertKeys.includes(alertKey)
+        ? currentAcknowledgedAlertKeys
+        : [...currentAcknowledgedAlertKeys, alertKey]
+    );
+  }, []);
+
+  const handleDismissEmergencyPopup = useCallback(() => {
+    if (!visiblePopupAlert) {
+      return;
+    }
+
+    acknowledgeEmergencyPopup(visiblePopupAlert);
+  }, [acknowledgeEmergencyPopup, visiblePopupAlert]);
 
   return (
     <AppScrollScreen>
@@ -416,44 +486,6 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {!isLoadingAlerts && visibleEmergencyAlerts.length > 0 ? (
-          <View style={styles.emergencyFeed}>
-            <SectionHeader
-              kicker="Live Alerts"
-              title="Nearby emergency requests"
-              subtitle="Open a private chat if you can assist someone nearby."
-            />
-
-            {visibleEmergencyAlerts.map((alertDocument) => (
-              <View key={alertDocument.id} style={styles.alertCard}>
-                <View style={styles.userTopRow}>
-                  <View style={styles.userTitleWrap}>
-                    <Text style={styles.userName}>{alertDocument.anonymousName}</Text>
-                    <Text style={styles.userMeta}>{getRoleLabel(alertDocument.role)}</Text>
-                  </View>
-                  <Pill label={formatApproximateDistance(alertDocument.distanceInMeters)} tone="danger" />
-                </View>
-
-                <Text style={styles.alertText}>
-                  Emergency alert visible within {formatRadiusLabel(alertDocument.radiusMeters)}.
-                </Text>
-
-                <ActionButton
-                  label="Open support chat"
-                  tone="dark"
-                  onPress={() => {
-                    void openDirectChat({
-                      anonymousName: alertDocument.anonymousName,
-                      role: alertDocument.role,
-                      uid: alertDocument.creatorId,
-                    });
-                  }}
-                />
-              </View>
-            ))}
-          </View>
-        ) : null}
-
         {!isLoadingAlerts && !alertsError && !activeOwnAlert && visibleEmergencyAlerts.length === 0 ? (
           <EmptyStateCard
             title="No active SOS nearby"
@@ -461,6 +493,75 @@ export default function HomeScreen() {
           />
         ) : null}
       </SurfaceCard>
+
+      <Modal
+        animationType="fade"
+        onRequestClose={handleDismissEmergencyPopup}
+        transparent
+        visible={Boolean(visiblePopupAlert)}>
+        <View style={styles.popupBackdrop}>
+          <Animated.View
+            style={[
+              styles.popupCard,
+              {
+                opacity: popupOpacity,
+                transform: [{ scale: popupScale }],
+              },
+            ]}>
+            <SectionHeader
+              kicker="New Alert"
+              title="Nearby emergency request"
+              subtitle="Open a private support chat if you can help, or dismiss this popup for now."
+            />
+
+            {visiblePopupAlert ? (
+              <>
+                <View style={styles.userTopRow}>
+                  <View style={styles.userTitleWrap}>
+                    <Text style={styles.userName}>{visiblePopupAlert.anonymousName}</Text>
+                    <Text style={styles.userMeta}>{getRoleLabel(visiblePopupAlert.role)}</Text>
+                  </View>
+                  <Pill
+                    label={formatApproximateDistance(visiblePopupAlert.distanceInMeters)}
+                    tone="danger"
+                  />
+                </View>
+
+                <Text style={styles.alertText}>
+                  Emergency alert visible within {formatRadiusLabel(visiblePopupAlert.radiusMeters)}.
+                </Text>
+
+                <View style={styles.popupActionStack}>
+                  <ActionButton
+                    centered
+                    label="Open Support chat"
+                    tone="dark"
+                    onPress={() => {
+                      if (!visiblePopupAlert) {
+                        return;
+                      }
+
+                      acknowledgeEmergencyPopup(visiblePopupAlert);
+
+                      void openDirectChat({
+                        anonymousName: visiblePopupAlert.anonymousName,
+                        role: visiblePopupAlert.role,
+                        uid: visiblePopupAlert.creatorId,
+                      });
+                    }}
+                  />
+                  <ActionButton
+                    centered
+                    label="Cancel"
+                    tone="ghost"
+                    onPress={handleDismissEmergencyPopup}
+                  />
+                </View>
+              </>
+            ) : null}
+          </Animated.View>
+        </View>
+      </Modal>
 
       <SurfaceCard>
         <SectionHeader
@@ -516,8 +617,10 @@ export default function HomeScreen() {
                 </View>
 
                 <ActionButton
+                  compact
                   label="Start anonymous chat"
                   tone="dark"
+                  centered
                   onPress={() => {
                     void openDirectChat({
                       anonymousName: nearbyUser.anonymousName,
@@ -533,6 +636,7 @@ export default function HomeScreen() {
         <View style={styles.refreshRow}>
           <ActionButton
             label="Refresh nearby users"
+            centered
             loading={isSyncingLocation || isLoadingUsers}
             onPress={() => {
               void refreshLocation();
@@ -545,22 +649,10 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  alertCard: {
-    backgroundColor: AppTheme.colors.cardAlt,
-    borderColor: AppTheme.colors.border,
-    borderRadius: 22,
-    borderWidth: 1,
-    gap: 14,
-    marginTop: 14,
-    padding: 16,
-  },
   alertText: {
     color: AppTheme.colors.muted,
     fontSize: 14,
     lineHeight: 22,
-  },
-  emergencyFeed: {
-    marginTop: 18,
   },
   errorText: {
     color: AppTheme.colors.danger,
@@ -624,6 +716,26 @@ const styles = StyleSheet.create({
   },
   refreshRow: {
     marginTop: 16,
+    alignItems: 'center',
+  },
+  popupActionStack: {
+    gap: 12,
+    marginTop: 4,
+  },
+  popupBackdrop: {
+    backgroundColor: 'rgba(16, 32, 51, 0.55)',
+    flex: 1,
+    justifyContent: 'center',
+    padding: 20,
+  },
+  popupCard: {
+    backgroundColor: AppTheme.colors.card,
+    borderColor: AppTheme.colors.border,
+    borderRadius: 24,
+    borderWidth: 1,
+    gap: 16,
+    padding: 18,
+    ...AppTheme.shadow.card,
   },
   sendSosCard: {
     marginTop: 16,
@@ -657,20 +769,20 @@ const styles = StyleSheet.create({
   userCard: {
     backgroundColor: AppTheme.colors.cardAlt,
     borderColor: AppTheme.colors.border,
-    borderRadius: 22,
+    borderRadius: 20,
     borderWidth: 1,
-    gap: 14,
-    marginTop: 14,
-    padding: 16,
+    gap: 12,
+    marginTop: 12,
+    padding: 12,
   },
   userMeta: {
     color: AppTheme.colors.muted,
-    fontSize: 14,
-    marginTop: 4,
+    fontSize: 13,
+    marginTop: 3,
   },
   userName: {
     color: AppTheme.colors.text,
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '800',
   },
   userTitleWrap: {

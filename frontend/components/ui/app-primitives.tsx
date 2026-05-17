@@ -120,19 +120,25 @@ export function MetricRow({ label, value }: MetricRowProps) {
 }
 
 type ActionButtonProps = {
+  compact?: boolean;
   disabled?: boolean;
   label: string;
   loading?: boolean;
   onPress: () => void;
   tone?: 'accent' | 'dark' | 'ghost' | 'danger';
+  centered?: boolean;
+  rightAligned?: boolean;
 };
 
 export function ActionButton({
+  compact = false,
   disabled,
   label,
   loading,
   onPress,
   tone = 'accent',
+  centered = false,
+  rightAligned = false,
 }: ActionButtonProps) {
   const spinnerColor = tone === 'ghost' ? AppTheme.colors.accent : AppTheme.colors.white;
 
@@ -142,6 +148,9 @@ export function ActionButton({
       onPress={onPress}
       style={({ pressed }) => [
         styles.button,
+        compact ? styles.buttonCompact : null,
+        centered ? { alignSelf: 'center' } : null,
+        rightAligned ? { alignSelf: 'flex-end' } : null,
         tone === 'dark' ? styles.buttonDark : null,
         tone === 'ghost' ? styles.buttonGhost : null,
         tone === 'danger' ? styles.buttonDanger : null,
@@ -202,6 +211,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     ...AppTheme.shadow.button,
   },
+  buttonCompact: {
+    minHeight: 42,
+    minWidth: 116,
+    paddingHorizontal: 14,
+  },
   buttonDark: {
     backgroundColor: AppTheme.colors.dark,
     shadowColor: AppTheme.colors.dark,
@@ -234,7 +248,7 @@ const styles = StyleSheet.create({
     borderColor: AppTheme.colors.border,
     borderRadius: AppTheme.radius.xl,
     borderWidth: 1,
-    padding: AppTheme.spacing.card,
+    padding: 16,
     ...AppTheme.shadow.card,
   },
   emptyState: {
@@ -265,7 +279,7 @@ const styles = StyleSheet.create({
     gap: 16,
     justifyContent: 'space-between',
     overflow: 'hidden',
-    padding: 22,
+    padding: 20,
   },
   heroAside: {
     alignItems: 'flex-end',
@@ -274,8 +288,8 @@ const styles = StyleSheet.create({
   },
   heroSubtitle: {
     color: AppTheme.colors.darkMuted,
-    fontSize: 15,
-    lineHeight: 24,
+    fontSize: 14,
+    lineHeight: 22,
     marginTop: 10,
   },
   heroTextWrap: {
@@ -283,10 +297,10 @@ const styles = StyleSheet.create({
   },
   heroTitle: {
     color: AppTheme.colors.white,
-    fontSize: 30,
+    fontSize: 27,
     fontWeight: '800',
-    lineHeight: 36,
-    marginTop: 14,
+    lineHeight: 31,
+    marginTop: 12,
   },
   inner: {
     alignSelf: 'center',
@@ -298,7 +312,7 @@ const styles = StyleSheet.create({
   },
   kicker: {
     color: AppTheme.colors.accent,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '800',
     letterSpacing: 0.8,
     textTransform: 'uppercase',
@@ -365,16 +379,16 @@ const styles = StyleSheet.create({
     paddingBottom: 120,
   },
   sectionHeader: {
-    gap: 6,
+    gap: 4,
   },
   sectionSubtitle: {
     color: AppTheme.colors.muted,
-    fontSize: 14,
-    lineHeight: 22,
+    fontSize: 13,
+    lineHeight: 20,
   },
   sectionTitle: {
     color: AppTheme.colors.text,
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '800',
   },
 });
