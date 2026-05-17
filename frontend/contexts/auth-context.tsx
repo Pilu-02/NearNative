@@ -6,6 +6,7 @@ import {
   onAuthStateChanged,
   reload,
   sendEmailVerification,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
 } from 'firebase/auth';
@@ -37,6 +38,7 @@ type AuthContextValue = {
   isAuthOperationLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  requestPasswordReset: (email: string) => Promise<void>;
   reloadUser: () => Promise<void>;
   resendVerificationEmail: () => Promise<void>;
   signup: (input: SignupInput) => Promise<void>;
@@ -93,6 +95,15 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
         try {
           await signOut(auth);
+        } finally {
+          setIsAuthOperationLoading(false);
+        }
+      },
+      requestPasswordReset: async (email) => {
+        setIsAuthOperationLoading(true);
+
+        try {
+          await sendPasswordResetEmail(auth, email);
         } finally {
           setIsAuthOperationLoading(false);
         }

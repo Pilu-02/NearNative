@@ -79,7 +79,7 @@ export default function HomeScreen() {
   const [isSubmittingSos, setIsSubmittingSos] = useState(false);
   const [usersError, setUsersError] = useState('');
   const [alertsError, setAlertsError] = useState('');
-  const [sosTimerId, setSosTimerId] = useState<NodeJS.Timeout | null>(null);
+  const [sosTimerId, setSosTimerId] = useState<ReturnType<typeof setInterval> | null>(null);
   const [sosTimeRemaining, setSosTimeRemaining] = useState(0);
   const popupScale = useRef(new Animated.Value(0.96)).current;
   const popupOpacity = useRef(new Animated.Value(0)).current;

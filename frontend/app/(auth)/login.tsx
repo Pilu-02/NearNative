@@ -15,7 +15,7 @@ import { getFirebaseErrorMessage } from '@/lib/firebase-errors';
 import { useAuth } from '@/contexts/auth-context';
 
 export default function LoginScreen() {
-  const { login } = useAuth();
+  const { login, requestPasswordReset } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [emailError, setEmailError] = useState('');
@@ -49,6 +49,28 @@ export default function LoginScreen() {
       await login(trimmedEmail, password);
     } catch (error) {
       Alert.alert('Login failed', getFirebaseErrorMessage(error));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    const trimmedEmail = email.trim().toLowerCase();
+
+    if (!trimmedEmail) {
+      setEmailError('Enter your email first so we know where to send the reset link.');
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      await requestPasswordReset(trimmedEmail);
+      Alert.alert(
+        'Reset link sent',
+        'If this email is registered, a password reset link has been sent to the inbox.'
+      );
+    } catch (error) {
+      Alert.alert('Reset failed', getFirebaseErrorMessage(error));
     } finally {
       setIsSubmitting(false);
     }
@@ -92,6 +114,18 @@ export default function LoginScreen() {
 
         <Pressable
           disabled={isSubmitting}
+          onPress={() => {
+            void handleForgotPassword();
+          }}
+          style={({ pressed }) => [
+            styles.forgotPasswordButton,
+            pressed && !isSubmitting ? styles.forgotPasswordPressed : null,
+          ]}>
+          <Text style={styles.forgotPasswordText}>Forgot password?</Text>
+        </Pressable>
+
+        <Pressable
+          disabled={isSubmitting}
           onPress={handleLogin}
           style={({ pressed }) => [
             styles.primaryButton,
@@ -117,6 +151,18 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
+  forgotPasswordButton: {
+    alignSelf: 'flex-end',
+    marginTop: -6,
+  },
+  forgotPasswordPressed: {
+    opacity: 0.72,
+  },
+  forgotPasswordText: {
+    color: '#1565c0',
+    fontSize: 14,
+    fontWeight: '700',
+  },
   footer: {
     alignItems: 'center',
     flexDirection: 'row',
