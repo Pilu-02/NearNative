@@ -66,6 +66,8 @@ export default function ChatsScreen() {
     return unsubscribe;
   }, [user]);
 
+  const totalUnreadCount = chats.reduce((sum, chat) => sum + (chat.unreadCounts?.[user?.uid ?? ''] ?? 0), 0);
+
   return (
     <AppScrollScreen>
       <HeroPanel
@@ -74,8 +76,8 @@ export default function ChatsScreen() {
         subtitle="Your anonymous conversations update in real time and stay visible for 48 hours from the latest message."
         aside={
           <View style={styles.heroAside}>
-            <Text style={styles.heroCount}>{chats.length}</Text>
-            <Text style={styles.heroCountLabel}>active</Text>
+            <Text style={styles.heroCount}>{totalUnreadCount > 0 ? totalUnreadCount : chats.length}</Text>
+            <Text style={styles.heroCountLabel}>{totalUnreadCount > 0 ? 'unread' : 'active'}</Text>
           </View>
         }
       />
@@ -101,6 +103,7 @@ export default function ChatsScreen() {
         {!isLoadingChats &&
           chats.map((chat) => {
             const partner = getOtherParticipant(chat, user?.uid ?? '');
+            const unreadCount = chat.unreadCounts?.[user?.uid ?? ''] ?? 0;
 
             if (!partner || !partner.uid) {
               return null;
@@ -115,7 +118,10 @@ export default function ChatsScreen() {
                       {partner.role === 'local' ? 'Local' : 'Visitor'}
                     </Text>
                   </View>
-                  <Pill label="Live" tone="neutral" />
+                  <View style={styles.chatTopRightWrap}>
+                    <Pill label="Live" tone="neutral" />
+                    {unreadCount > 0 ? <Pill label={unreadCount.toString()} tone="danger" /> : null}
+                  </View>
                 </View>
 
                 <View style={styles.chatBottomRow}>
@@ -171,6 +177,11 @@ const styles = StyleSheet.create({
   chatTopRow: {
     alignItems: 'center',
     flexDirection: 'row',
+  },
+  chatTopRightWrap: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
   },
   chatBottomRow: {
     marginTop: 6,

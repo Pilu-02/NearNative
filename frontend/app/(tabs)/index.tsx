@@ -79,6 +79,8 @@ export default function HomeScreen() {
   const [isSubmittingSos, setIsSubmittingSos] = useState(false);
   const [usersError, setUsersError] = useState('');
   const [alertsError, setAlertsError] = useState('');
+  const [sosTimerId, setSosTimerId] = useState<NodeJS.Timeout | null>(null);
+  const [sosTimeRemaining, setSosTimeRemaining] = useState(0);
   const popupScale = useRef(new Animated.Value(0.96)).current;
   const popupOpacity = useRef(new Animated.Value(0)).current;
 
@@ -338,9 +340,27 @@ export default function HomeScreen() {
         { merge: true }
       );
 
+      // Set 1-minute auto-disable timer
+      setSosTimeRemaining(60);
+      const timerInterval = setInterval(() => {
+        setSosTimeRemaining((prev) => {
+          if (prev <= 1) {
+            clearInterval(timerInterval);
+            // Auto-disable SOS after 1 minute
+            deleteDoc(doc(db, 'sosAlerts', user.uid)).catch((error) => {
+              console.error('Failed to auto-disable SOS alert.', error);
+            });
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+
+      setSosTimerId(timerInterval);
+
       Alert.alert(
         'SOS sent',
-        `Signed-in users within ${formatRadiusLabel(selectedRadiusMeters)} can now see your emergency alert.`
+        `Signed-in users within ${formatRadiusLabel(selectedRadiusMeters)} can now see your emergency alert. It will auto-disable in 1 minute.`
       );
     } catch (error) {
       console.error('Failed to send SOS alert.', error);
@@ -358,6 +378,13 @@ export default function HomeScreen() {
       return;
     }
 
+    // Clear the auto-disable timer
+    if (sosTimerId) {
+      clearInterval(sosTimerId);
+      setSosTimerId(null);
+      setSosTimeRemaining(0);
+    }
+
     try {
       setIsSubmittingSos(true);
       await deleteDoc(doc(db, 'sosAlerts', user.uid));
@@ -370,7 +397,7 @@ export default function HomeScreen() {
     } finally {
       setIsSubmittingSos(false);
     }
-  }, [user]);
+  }, [user, sosTimerId]);
 
   const acknowledgeEmergencyPopup = useCallback((alertDocument: NearbySosAlert) => {
     const alertKey = getNearbyAlertKey(alertDocument);
@@ -389,6 +416,15 @@ export default function HomeScreen() {
 
     acknowledgeEmergencyPopup(visiblePopupAlert);
   }, [acknowledgeEmergencyPopup, visiblePopupAlert]);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (sosTimerId) {
+        clearInterval(sosTimerId);
+      }
+    };
+  }, [sosTimerId]);
 
   return (
     <AppScrollScreen>
@@ -451,6 +487,11 @@ export default function HomeScreen() {
                   Nearby users inside {formatRadiusLabel(activeOwnAlert.radiusMeters)} can see your
                   request for help right now.
                 </Text>
+                {sosTimeRemaining > 0 && (
+                  <Text style={styles.sosTimer}>
+                    Auto-disables in {sosTimeRemaining}s
+                  </Text>
+                )}
               </View>
               <Pill label="Active" tone="danger" />
             </View>
@@ -485,13 +526,6 @@ export default function HomeScreen() {
             />
           </View>
         )}
-
-        {!isLoadingAlerts && !alertsError && !activeOwnAlert && visibleEmergencyAlerts.length === 0 ? (
-          <EmptyStateCard
-            title="No active SOS nearby"
-            description="If someone nearby triggers an emergency alert, it will appear here instantly."
-          />
-        ) : null}
       </SurfaceCard>
 
       <Modal
@@ -752,6 +786,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 22,
     marginTop: 6,
+  },
+  sosTimer: {
+    color: AppTheme.colors.danger,
+    fontSize: 13,
+    fontWeight: '700',
+    marginTop: 8,
+    letterSpacing: 0.5,
   },
   sosTextWrap: {
     flex: 1,

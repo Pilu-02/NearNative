@@ -14,11 +14,13 @@ import {
   addDoc,
   collection,
   doc,
+  increment,
   onSnapshot,
   orderBy,
   query,
   serverTimestamp,
   setDoc,
+  updateDoc,
 } from 'firebase/firestore';
 
 import { ActionButton, EmptyStateCard, LoadingCard, Pill } from '@/components/ui/app-primitives';
@@ -71,6 +73,15 @@ export default function ChatScreen() {
       setChatError('This chat could not be opened.');
       setIsLoadingMessages(false);
       return;
+    }
+
+    if (user) {
+      const chatRef = doc(db, 'chats', chatId);
+      const updateData: Record<string, number> = {};
+      updateData[`unreadCounts.${user.uid}`] = 0;
+      updateDoc(chatRef, updateData).catch((error) => {
+        console.error('Failed to reset unread count.', error);
+      });
     }
 
     const chatRef = doc(db, 'chats', chatId);
@@ -149,6 +160,9 @@ export default function ChatScreen() {
           participantIds: [currentParticipant.uid, partnerParticipant.uid].sort(),
           participants: [currentParticipant, partnerParticipant],
           updatedAt: serverTimestamp(),
+          unreadCounts: {
+            [partnerId]: increment(1),
+          },
         },
         { merge: true }
       );

@@ -7,10 +7,12 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { AppTheme, Colors } from '@/constants/theme';
 import { useAuth } from '@/contexts/auth-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useUnreadChatCount } from '@/hooks/use-unread-count';
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
   const { isAuthLoading, isAuthOperationLoading, isEmailVerified, user } = useAuth();
+  const totalUnreadCount = useUnreadChatCount();
 
   if (isAuthLoading || isAuthOperationLoading) {
     return <ScreenLoader label="Preparing your dashboard..." />;
@@ -62,6 +64,7 @@ export default function TabLayout() {
         options={{
           title: 'Chats',
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="message.fill" color={color} />,
+          tabBarBadge: totalUnreadCount > 0 ? totalUnreadCount : undefined,
         }}
       />
       <Tabs.Screen

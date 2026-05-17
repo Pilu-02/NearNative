@@ -14,6 +14,7 @@ export type ChatDocument = {
   participantIds: string[];
   participants: ChatParticipant[];
   updatedAt?: unknown;
+  unreadCounts?: Record<string, number>;
 };
 
 export type ChatMessage = {
