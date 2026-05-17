@@ -1,24 +1,44 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import type { PropsWithChildren } from 'react';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { createUserWithEmailAndPassword, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import {
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  reload,
+  sendEmailVerification,
+  signInWithEmailAndPassword,
+  signOut,
+} from 'firebase/auth';
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 
-import { auth, db } from '@/lib/firebase';
+import { auth, db, storage } from '@/lib/firebase';
 import { generateAnonymousName } from '@/lib/anonymous-name';
 import type { UserRole } from '@/types/user';
 
+type SignupDocumentInput = {
+  mimeType?: string;
+  name: string;
+  uri: string;
+};
+
 type SignupInput = {
+  localAddress?: string;
+  localDocument?: SignupDocumentInput | null;
+  fullName?: string;
   email: string;
   password: string;
   role: UserRole;
 };
 
 type AuthContextValue = {
+  isEmailVerified: boolean;
   isAuthLoading: boolean;
   isAuthOperationLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  reloadUser: () => Promise<void>;
+  resendVerificationEmail: () => Promise<void>;
   signup: (input: SignupInput) => Promise<void>;
   user: FirebaseUser | null;
 };
@@ -29,6 +49,20 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [isAuthOperationLoading, setIsAuthOperationLoading] = useState(false);
+
+  const syncVerifiedUserMetadata = async (currentUser: FirebaseUser) => {
+    if (!currentUser.emailVerified) {
+      return;
+    }
+
+    await setDoc(
+      doc(db, 'users', currentUser.uid),
+      {
+        emailVerifiedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+  };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -42,12 +76,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const value = useMemo<AuthContextValue>(
     () => ({
       isAuthLoading,
+      isEmailVerified: user?.emailVerified ?? false,
       isAuthOperationLoading,
       login: async (email, password) => {
         setIsAuthOperationLoading(true);
 
         try {
-          await signInWithEmailAndPassword(auth, email, password);
+          const credential = await signInWithEmailAndPassword(auth, email, password);
+          await syncVerifiedUserMetadata(credential.user);
         } finally {
           setIsAuthOperationLoading(false);
         }
@@ -61,21 +97,105 @@ export function AuthProvider({ children }: PropsWithChildren) {
           setIsAuthOperationLoading(false);
         }
       },
-      signup: async ({ email, password, role }) => {
+      reloadUser: async () => {
+        if (!auth.currentUser) {
+          return;
+        }
+
+        setIsAuthOperationLoading(true);
+
+        try {
+          await reload(auth.currentUser);
+          setUser(auth.currentUser ? { ...auth.currentUser } : null);
+
+          if (auth.currentUser?.emailVerified) {
+            await syncVerifiedUserMetadata(auth.currentUser);
+          }
+        } finally {
+          setIsAuthOperationLoading(false);
+        }
+      },
+      resendVerificationEmail: async () => {
+        if (!auth.currentUser) {
+          return;
+        }
+
+        setIsAuthOperationLoading(true);
+
+        try {
+          await sendEmailVerification(auth.currentUser);
+        } finally {
+          setIsAuthOperationLoading(false);
+        }
+      },
+      signup: async ({ email, password, role, fullName, localAddress, localDocument }) => {
+        let uploadedDocumentPath = '';
+
         try {
           setIsAuthOperationLoading(true);
 
           const credential = await createUserWithEmailAndPassword(auth, email, password);
+          const isLocalApplicant = role === 'local';
+          const activeRole: UserRole = isLocalApplicant ? 'visitor' : role;
+
+          if (isLocalApplicant) {
+            if (!fullName || !localAddress || !localDocument) {
+              throw new Error('Missing local verification details.');
+            }
+
+            const safeFileName = `${Date.now()}-${localDocument.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+            uploadedDocumentPath = `local-verification/${credential.user.uid}/${safeFileName}`;
+            const storageRef = ref(storage, uploadedDocumentPath);
+            const uploadResponse = await fetch(localDocument.uri);
+            const documentBlob = await uploadResponse.blob();
+
+            await uploadBytes(storageRef, documentBlob, {
+              contentType: localDocument.mimeType || 'application/octet-stream',
+            });
+
+            const documentUrl = await getDownloadURL(storageRef);
+
+            await setDoc(doc(db, 'localVerificationRequests', credential.user.uid), {
+              address: localAddress.trim(),
+              createdAt: serverTimestamp(),
+              documentMimeType: localDocument.mimeType || null,
+              documentName: localDocument.name,
+              documentPath: uploadedDocumentPath,
+              documentUrl,
+              email,
+              fullName: fullName.trim(),
+              status: 'pending',
+              uid: credential.user.uid,
+              updatedAt: serverTimestamp(),
+            });
+          }
 
           await setDoc(doc(db, 'users', credential.user.uid), {
-            anonymousName: generateAnonymousName(role),
+            anonymousName: generateAnonymousName(activeRole),
+            emailVerifiedAt: null,
             uid: credential.user.uid,
             email,
-            role,
+            fullName: fullName?.trim() || null,
+            isLocalVerified: false,
+            localAddress: localAddress?.trim() || null,
+            localVerificationStatus: isLocalApplicant ? 'pending' : 'not_requested',
+            requestedRole: role,
+            role: activeRole,
             createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
           });
+
+          await sendEmailVerification(credential.user);
         } catch (error) {
           console.error('Failed to create Firestore user document during signup.', error);
+
+          if (uploadedDocumentPath) {
+            try {
+              await deleteObject(ref(storage, uploadedDocumentPath));
+            } catch {
+              // Best-effort cleanup only.
+            }
+          }
 
           if (auth.currentUser) {
             try {

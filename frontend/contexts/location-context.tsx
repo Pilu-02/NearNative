@@ -22,14 +22,14 @@ type LocationContextValue = {
 const LocationContext = createContext<LocationContextValue | undefined>(undefined);
 
 export function LocationProvider({ children }: PropsWithChildren) {
-  const { user } = useAuth();
+  const { isEmailVerified, user } = useAuth();
   const [coordinates, setCoordinates] = useState<Coordinates | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [isSyncingLocation, setIsSyncingLocation] = useState(false);
   const [permissionStatus, setPermissionStatus] = useState<Location.PermissionStatus | null>(null);
 
   const refreshLocation = async () => {
-    if (!user) {
+    if (!user || !isEmailVerified) {
       return;
     }
 
@@ -80,7 +80,7 @@ export function LocationProvider({ children }: PropsWithChildren) {
   };
 
   useEffect(() => {
-    if (!user) {
+    if (!user || !isEmailVerified) {
       setCoordinates(null);
       setErrorMessage('');
       setIsSyncingLocation(false);
@@ -89,7 +89,7 @@ export function LocationProvider({ children }: PropsWithChildren) {
     }
 
     void refreshLocation();
-  }, [user]);
+  }, [isEmailVerified, user]);
 
   const value = useMemo<LocationContextValue>(
     () => ({

@@ -10,7 +10,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
-  const { isAuthLoading, isAuthOperationLoading, user } = useAuth();
+  const { isAuthLoading, isAuthOperationLoading, isEmailVerified, user } = useAuth();
 
   if (isAuthLoading || isAuthOperationLoading) {
     return <ScreenLoader label="Preparing your dashboard..." />;
@@ -18,6 +18,10 @@ export default function TabLayout() {
 
   if (!user) {
     return <Redirect href="/login" />;
+  }
+
+  if (!isEmailVerified) {
+    return <Redirect href={'/verify-email' as never} />;
   }
 
   return (
