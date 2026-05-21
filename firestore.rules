@@ -1,6 +1,8 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
+
     function signedIn() {
       return request.auth != null;
     }
@@ -10,37 +12,68 @@ service cloud.firestore {
     }
 
     function isParticipantFromResource() {
-      return signedIn() && request.auth.uid in resource.data.participantIds;
+      return signedIn() &&
+        request.auth.uid in resource.data.participantIds;
     }
 
     function isChatParticipant(chatId) {
       return signedIn() &&
         exists(/databases/$(database)/documents/chats/$(chatId)) &&
-        request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
+        request.auth.uid in
+        get(/databases/$(database)/documents/chats/$(chatId)).data.participantIds;
     }
 
     match /users/{userId} {
       allow read: if signedIn();
-      allow create: if isOwnUser(userId);
-      allow update: if isOwnUser(userId);
+
+      allow create: if isOwnUser(userId)
+        && request.resource.data.uid == request.auth.uid
+        && (
+          request.resource.data.role == 'visitor' ||
+          request.resource.data.role == 'local'
+        )
+        && (
+          request.resource.data.requestedRole == 'visitor' ||
+          request.resource.data.requestedRole == 'local'
+        );
+
+      allow update: if isOwnUser(userId)
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.requestedRole == resource.data.requestedRole
+        && request.resource.data.isLocalVerified == resource.data.isLocalVerified
+        && request.resource.data.localVerificationStatus == resource.data.localVerificationStatus;
+
       allow delete: if false;
     }
+
+    match /localVerificationRequests/{userId} {
+      allow create: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.uid == request.auth.uid;
+
+      allow read: if signedIn()
+        && request.auth.uid == userId;
+
+      allow update: if false;
+      allow delete: if false;
+    }
+
     match /sosAlerts/{alertId} {
-  allow read: if signedIn();
+      allow read: if signedIn();
 
-  allow create: if signedIn()
-    && request.auth.uid == alertId
-    && request.resource.data.creatorId == request.auth.uid;
+      allow create: if signedIn()
+        && request.auth.uid == alertId
+        && request.resource.data.creatorId == request.auth.uid;
 
-  allow update: if signedIn()
-    && request.auth.uid == alertId
-    && resource.data.creatorId == request.auth.uid
-    && request.resource.data.creatorId == request.auth.uid;
+      allow update: if signedIn()
+        && request.auth.uid == alertId
+        && resource.data.creatorId == request.auth.uid
+        && request.resource.data.creatorId == request.auth.uid;
 
-  allow delete: if signedIn()
-    && request.auth.uid == alertId;
-}
-
+      allow delete: if signedIn()
+        && request.auth.uid == alertId;
+    }
 
     match /chats/{chatId} {
       allow read: if isParticipantFromResource();
