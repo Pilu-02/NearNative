@@ -147,13 +147,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
           const credential = await createUserWithEmailAndPassword(auth, email, password);
           const isLocalApplicant = role === 'local';
-          const activeRole: UserRole = isLocalApplicant ? 'visitor' : role;
+          const hasVerificationSubmission =
+            isLocalApplicant &&
+            Boolean(fullName?.trim()) &&
+            Boolean(localAddress?.trim()) &&
+            Boolean(localDocument);
+          const activeRole: UserRole = role;
 
-          if (isLocalApplicant) {
-            if (!fullName || !localAddress || !localDocument) {
-              throw new Error('Missing local verification details.');
-            }
-
+          if (hasVerificationSubmission && fullName && localAddress && localDocument) {
             const safeFileName = `${Date.now()}-${localDocument.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
             uploadedDocumentPath = `local-verification/${credential.user.uid}/${safeFileName}`;
             const storageRef = ref(storage, uploadedDocumentPath);
@@ -187,9 +188,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
             uid: credential.user.uid,
             email,
             fullName: fullName?.trim() || null,
-            isLocalVerified: false,
+            isLocalVerified: role === 'local',
             localAddress: localAddress?.trim() || null,
-            localVerificationStatus: isLocalApplicant ? 'pending' : 'not_requested',
+            localVerificationStatus: hasVerificationSubmission ? 'pending' : 'not_requested',
             requestedRole: role,
             role: activeRole,
             createdAt: serverTimestamp(),

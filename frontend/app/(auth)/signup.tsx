@@ -112,32 +112,9 @@ export default function SignupScreen() {
       setRoleError('');
     }
 
-    if (isLocalSignup) {
-      if (!trimmedFullName) {
-        setFullNameError('Your full name is required for local verification.');
-        hasError = true;
-      } else {
-        setFullNameError('');
-      }
-
-      if (!trimmedAddress) {
-        setAddressError('Please provide the address where you live.');
-        hasError = true;
-      } else {
-        setAddressError('');
-      }
-
-      if (!pickedDocument) {
-        setDocumentError('Please upload a proof document for review.');
-        hasError = true;
-      } else {
-        setDocumentError('');
-      }
-    } else {
-      setFullNameError('');
-      setAddressError('');
-      setDocumentError('');
-    }
+    setFullNameError('');
+    setAddressError('');
+    setDocumentError('');
 
     if (hasError || !selectedRole) {
       return;
@@ -168,7 +145,7 @@ export default function SignupScreen() {
     <AuthShell
       badge="Join the network"
       title="Create your NearNative account"
-      subtitle="Visitors can join instantly. Local applicants submit a quick verification request before local access is activated.">
+      subtitle="Visitors can join instantly. In this demo build, local verification details stay visible but optional for signup.">
       <View style={styles.form}>
         <FormInput
           autoCapitalize="none"
@@ -241,7 +218,7 @@ export default function SignupScreen() {
           <View style={styles.localSection}>
             <Text style={styles.localHeading}>Local verification details</Text>
             <Text style={styles.localHelper}>
-              Your local access stays pending until the backend team reviews your submitted proof.
+              These fields are optional in the presentation build. You can still create a local profile without uploading a document.
             </Text>
 
             <FormInput

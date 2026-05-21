@@ -11,25 +11,10 @@ import {
 import { AppTheme } from '@/constants/theme';
 import { useAuth } from '@/contexts/auth-context';
 import { useUserProfile } from '@/contexts/user-profile-context';
-import type { LocalVerificationStatus } from '@/types/user';
-
-function getVerificationLabel(status: LocalVerificationStatus | undefined) {
-  switch (status) {
-    case 'approved':
-      return 'Approved';
-    case 'pending':
-      return 'Pending review';
-    case 'rejected':
-      return 'Rejected';
-    default:
-      return 'Not requested';
-  }
-}
 
 export default function ProfileScreen() {
   const { isEmailVerified, logout, user } = useAuth();
   const { userProfile } = useUserProfile();
-  const localStatus = userProfile?.localVerificationStatus;
   const requestedRole = userProfile?.requestedRole ?? userProfile?.role;
   const activeRole =
     userProfile?.role === 'local'
@@ -65,13 +50,10 @@ export default function ProfileScreen() {
         </View>
       </SurfaceCard>
 
-      {/* Verification card removed per request */}
-
       <View style={styles.signOutWrap}>
         <ActionButton
           label="Sign out"
           tone="dark"
-            centered
           onPress={() => {
             void (async () => {
               try {
@@ -89,17 +71,8 @@ export default function ProfileScreen() {
 
 const styles = StyleSheet.create({
   signOutWrap: {
-    marginTop: 24,
     alignItems: 'center',
-  },
-  actionRow: {
-    marginTop: 16,
-  },
-  helperText: {
-    color: AppTheme.colors.muted,
-    fontSize: 14,
-    lineHeight: 22,
-    marginTop: 8,
+    marginTop: 24,
   },
   metricsWrap: {
     gap: 14,
